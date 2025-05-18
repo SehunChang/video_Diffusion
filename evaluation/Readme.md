@@ -11,6 +11,6 @@ python3 or python run_eval.py --fake_dir {fake directory} --real_dir {} --out_cs
 다음과 같은 형태로 저장되어야 함 allimages 이름은 상관없음.
 real_data
     - allimages
-      -imgae1
-      -imgae2
+      -image1
+      -image2
       ,,,
