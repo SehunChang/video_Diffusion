@@ -8,6 +8,9 @@ from time import time
 from tqdm import tqdm
 from easydict import EasyDict
 import glob
+import json
+import logging
+from datetime import datetime
 
 import torch
 import torch.distributed as dist
@@ -168,26 +171,56 @@ class GuassianDiffusion:
         return final
 
 
-class loss_logger:
+class LossLogger:
     def __init__(self, max_steps):
         self.max_steps = max_steps
         self.loss = []
         self.start_time = time()
         self.ema_loss = None
         self.ema_w = 0.9
+        self.current_step = 0
+        self.metrics = {}
 
     def log(self, v, display=False):
-        self.loss.append(v)
-        if self.ema_loss is None:
-            self.ema_loss = v
+        # Handle both single value and dictionary inputs
+        if isinstance(v, dict):
+            metrics_dict = v
         else:
-            self.ema_loss = self.ema_w * self.ema_loss + (1 - self.ema_w) * v
+            metrics_dict = {'loss': v}
+            
+        # Update metrics
+        for k, v in metrics_dict.items():
+            if k not in self.metrics:
+                self.metrics[k] = []
+            self.metrics[k].append(v)
+            
+            # Update EMA for each metric
+            ema_key = f"{k}_ema"
+            if not hasattr(self, ema_key):
+                setattr(self, ema_key, v)
+            else:
+                current_ema = getattr(self, ema_key)
+                setattr(self, ema_key, self.ema_w * current_ema + (1 - self.ema_w) * v)
+
+        self.current_step += 1
 
         if display:
-            print(
-                f"Steps: {len(self.loss)}/{self.max_steps} \t loss (ema): {self.ema_loss:.3f} "
-                + f"\t Time elapsed: {(time() - self.start_time)/3600:.3f} hr"
+            elapsed_time = (time() - self.start_time) / 3600
+            # Format all EMAs for display
+            ema_strings = []
+            for k in metrics_dict.keys():
+                ema_value = getattr(self, f"{k}_ema")
+                ema_strings.append(f"{k} (ema): {ema_value:.3f}")
+            
+            message = (
+                f"Steps: {self.current_step}/{self.max_steps} "
+                f"{', '.join(ema_strings)} "
+                f"Time elapsed: {elapsed_time:.3f} hr"
             )
+            if hasattr(self, 'logger'):
+                self.logger.log_info(message)
+            else:
+                print(message)
 
 
 def sample_N_images(
@@ -261,6 +294,83 @@ def sample_N_images(
         return None, None
 
 
+class TrainingLogger:
+    """Handles logging and directory organization for training."""
+    
+    def __init__(self, args):
+        """
+        Initialize the logger.
+        
+        Args:
+            args: Training arguments
+        """
+        self.args = args
+        self.setup_directories()
+        self.setup_logging()
+        
+    def setup_directories(self):
+        """Create necessary directories for training."""
+        # Create timestamp-based run directory
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_name = f"{self.args.arch}_{self.args.dataset}_{timestamp}"
+        self.run_dir = os.path.join(self.args.save_dir, run_name)
+        
+        # Create subdirectories
+        self.checkpoint_dir = os.path.join(self.run_dir, "checkpoints")
+        self.sample_dir = os.path.join(self.run_dir, "samples")
+        self.log_dir = os.path.join(self.run_dir, "logs")
+        
+        # Create directories if they don't exist
+        for dir_path in [self.checkpoint_dir, self.sample_dir, self.log_dir]:
+            os.makedirs(dir_path, exist_ok=True)
+            
+    def setup_logging(self):
+        """Setup logging configuration."""
+        if self.args.local_rank == 0:
+            # Setup file handler
+            log_file = os.path.join(self.log_dir, "training.log")
+            logging.basicConfig(
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s',
+                handlers=[
+                    logging.FileHandler(log_file),
+                    logging.StreamHandler()
+                ]
+            )
+            
+            # Save args to JSON
+            args_dict = vars(self.args)
+            with open(os.path.join(self.log_dir, "args.json"), 'w') as f:
+                json.dump(args_dict, f, indent=4)
+                
+    def log_info(self, message):
+        """Log info message."""
+        if self.args.local_rank == 0:
+            logging.info(message)
+            
+    def log_metrics(self, metrics_dict, step):
+        """Log metrics to file."""
+        if self.args.local_rank == 0:
+            metrics_file = os.path.join(self.log_dir, "metrics.jsonl")
+            metrics_dict['step'] = step
+            with open(metrics_file, 'a') as f:
+                f.write(json.dumps(metrics_dict) + '\n')
+                
+    def get_checkpoint_path(self, epoch):
+        """Get path for saving checkpoint."""
+        return os.path.join(
+            self.checkpoint_dir,
+            f"checkpoint_epoch_{epoch}.pt"
+        )
+        
+    def get_ema_checkpoint_path(self, epoch):
+        """Get path for saving EMA checkpoint."""
+        return os.path.join(
+            self.checkpoint_dir,
+            f"checkpoint_epoch_{epoch}_ema.pt"
+        )
+
+
 def main():
     parser = argparse.ArgumentParser("Minimal implementation of diffusion models")
     # diffusion model
@@ -292,6 +402,7 @@ def main():
     # dataset
     parser.add_argument("--dataset", type=str)
     parser.add_argument("--data-dir", type=str, default="./dataset/")
+    parser.add_argument("--motion-dir", type=str, default="")
     parser.add_argument("--num-training-data", type=int, default=None, help="Number of images to use for training (from the dataset folder)")
 
     # optimizer
@@ -318,7 +429,7 @@ def main():
         default=50000,
         help="Number of images required to sample from the model",
     )
-
+    parser.add_argument("--seq-len", type=int, default=1, help="Number of frames in each sequence")
     # trainer selection
     parser.add_argument(
         "--trainer", 
@@ -342,8 +453,10 @@ def main():
     torch.cuda.set_device(args.device)
     torch.manual_seed(args.seed + args.local_rank)
     np.random.seed(args.seed + args.local_rank)
-    if args.local_rank == 0:
-        print(args)
+
+    # Initialize logger
+    logger = TrainingLogger(args)
+    logger.log_info(f"Starting training with args: {args}")
 
     # Create model and diffusion process
     model = get_architecture(
@@ -354,37 +467,29 @@ def main():
         num_classes=metadata.num_classes if args.class_cond else None,
     ).to(args.device)
     
-    if args.local_rank == 0:
-        print(
-            "We are assuming that model input/ouput pixel range is [-1, 1]. Please adhere to it."
-        )
+    logger.log_info("We are assuming that model input/output pixel range is [-1, 1]. Please adhere to it.")
     diffusion = GuassianDiffusion(args.diffusion_steps, args.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
     # load pre-trained model
     if args.pretrained_ckpt:
-        print(f"Loading pretrained model from {args.pretrained_ckpt}")
+        logger.log_info(f"Loading pretrained model from {args.pretrained_ckpt}")
         d = fix_legacy_dict(torch.load(args.pretrained_ckpt, map_location=args.device))
         dm = model.state_dict()
         if args.delete_keys:
             for k in args.delete_keys:
-                print(
-                    f"Deleting key {k} becuase its shape in ckpt ({d[k].shape}) doesn't match "
+                logger.log_info(
+                    f"Deleting key {k} because its shape in ckpt ({d[k].shape}) doesn't match "
                     + f"with shape in model ({dm[k].shape})"
                 )
                 del d[k]
         model.load_state_dict(d, strict=False)
-        print(
-            f"Mismatched keys in ckpt and model: ",
-            set(d.keys()) ^ set(dm.keys()),
-        )
-        print(f"Loaded pretrained model from {args.pretrained_ckpt}")
+        logger.log_info(f"Mismatched keys in ckpt and model: {set(d.keys()) ^ set(dm.keys())}")
 
     # distributed training
     ngpus = torch.cuda.device_count()
     if ngpus > 1:
-        if args.local_rank == 0:
-            print(f"Using distributed training on {ngpus} gpus.")
+        logger.log_info(f"Using distributed training on {ngpus} gpus.")
         args.batch_size = args.batch_size // ngpus
         torch.distributed.init_process_group(backend="nccl", init_method="env://")
         model = DDP(model, device_ids=[args.local_rank], output_device=args.local_rank)
@@ -410,7 +515,7 @@ def main():
         return
 
     # Load dataset
-    train_set = get_dataset(args.dataset, args.data_dir, metadata, num_training_data=args.num_training_data)
+    train_set = get_dataset(args.dataset, args.data_dir, metadata, args)
     sampler = DistributedSampler(train_set) if ngpus > 1 else None
     train_loader = DataLoader(
         train_set,
@@ -420,28 +525,29 @@ def main():
         num_workers=4,
         pin_memory=True,
     )
-    if args.local_rank == 0:
-        print(
-            f"Training dataset loaded: Number of batches: {len(train_loader)}, Number of images: {len(train_set)}"
-        )
-    logger = loss_logger(len(train_loader) * args.epochs)
+    logger.log_info(
+        f"Training dataset loaded: Number of batches: {len(train_loader)}, Number of images: {len(train_set)}"
+    )
+    loss_logger = LossLogger(len(train_loader) * args.epochs)
+    loss_logger.logger = logger  # Connect loss_logger with TrainingLogger
 
     # ema model
     args.ema_dict = copy.deepcopy(model.state_dict())
     
     # Initialize the trainer
-    trainer_class = get_trainer(args.trainer)
+    trainer_class = get_trainer(args.trainer, args)
     trainer = trainer_class(model, diffusion, args)
     
     # Start training
     epoch_iter = range(args.epochs)
     if args.local_rank == 0:
-        from tqdm import tqdm
         epoch_iter = tqdm(epoch_iter, desc='Epochs', total=args.epochs)
     for epoch in epoch_iter:
         if sampler is not None:
             sampler.set_epoch(epoch)
-        trainer.train_one_epoch(train_loader, optimizer, logger, None)
+        trainer.train_one_epoch(train_loader, optimizer, loss_logger, None)
+        
+        # Sample images periodically
         if not epoch % 10:
             sampled_images, _ = sample_N_images(
                 32,
@@ -454,24 +560,28 @@ def main():
                 metadata.image_size,
                 metadata.num_classes,
                 args,
-                save_dir="/media/NAS/USERS/juhun/diffusion+/minimal-diffusion/sampled_images/online",
-                resume=False)
+                save_dir=logger.sample_dir,
+                resume=False
+            )
 
+        # Save checkpoints
         if args.local_rank == 0 and (epoch + 1) % args.save_every == 0:
-            torch.save(
-                model.state_dict(),
-                os.path.join(
-                    args.save_dir,
-                    f"{args.arch}_{args.dataset}-epoch_{epoch+1}-timesteps_{args.diffusion_steps}-class_condn_{args.class_cond}.pt",
-                ),
-            )
-            torch.save(
-                args.ema_dict,
-                os.path.join(
-                    args.save_dir,
-                    f"{args.arch}_{args.dataset}-epoch_{epoch+1}-timesteps_{args.diffusion_steps}-class_condn_{args.class_cond}_ema_{args.ema_w}.pt",
-                ),
-            )
+            # Save regular checkpoint
+            checkpoint_path = logger.get_checkpoint_path(epoch + 1)
+            torch.save(model.state_dict(), checkpoint_path)
+            logger.log_info(f"Saved checkpoint to {checkpoint_path}")
+            
+            # Save EMA checkpoint
+            ema_checkpoint_path = logger.get_ema_checkpoint_path(epoch + 1)
+            torch.save(args.ema_dict, ema_checkpoint_path)
+            logger.log_info(f"Saved EMA checkpoint to {ema_checkpoint_path}")
+            
+            # Log metrics
+            metrics = {
+                'epoch': epoch + 1,
+                'loss': loss_logger.ema_loss if loss_logger.ema_loss is not None else float('inf')
+            }
+            logger.log_metrics(metrics, epoch + 1)
 
 
 if __name__ == "__main__":

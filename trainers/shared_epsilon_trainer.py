@@ -14,7 +14,8 @@ class SharedEpsilonTrainer(BaseTrainer):
         else:
             data_iter = enumerate(dataloader)
             
-        for step, (video_frames, optical_flow, labels) in data_iter:
+        for step, (video_frames, optical_flow) in data_iter:
+
             batch_size, num_frames, channels, height, width = video_frames.shape
             assert num_frames == 3, "Expected 3 consecutive frames per sample"
             assert (video_frames.max().item() <= 1) and (0 <= video_frames.min().item())
@@ -39,7 +40,7 @@ class SharedEpsilonTrainer(BaseTrainer):
             xt_flat, _ = self.diffusion.sample_from_forward_process(frames_flat, t_flat, eps=eps_flat)
             
             # Model prediction
-            pred_eps_flat = self.model(xt_flat, t_flat, y=labels.repeat_interleave(num_frames) if labels is not None else None)
+            pred_eps_flat = self.model(xt_flat, t_flat, y=None)
             
             # Reshape predictions back to sequences
             pred_eps = pred_eps_flat.view(batch_size, num_frames, channels, height, width)
@@ -77,4 +78,9 @@ class SharedEpsilonTrainer(BaseTrainer):
                     self.args.ema_dict[k] = (
                         self.args.ema_w * self.args.ema_dict[k] + (1 - self.args.ema_w) * new_dict[k]
                     )
-                logger.log(loss.item(), display=not step % 100) 
+                logger.log({
+                    'loss': loss.item(),
+                    'reg_loss': reg_loss.item(),
+                    'flow_weight_0_1': flow_weight_0_1.mean().item(),
+                    'flow_weight_1_2': flow_weight_1_2.mean().item()
+                }, display=not step % 100)

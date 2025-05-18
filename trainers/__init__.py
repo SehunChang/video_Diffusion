@@ -6,7 +6,7 @@ __all__ = [
     "SharedEpsilonTrainer",
 ]
 
-def get_trainer(trainer_name):
+def get_trainer(trainer_name,args):
     """
     Returns the trainer class based on the name.
     
@@ -19,6 +19,7 @@ def get_trainer(trainer_name):
     if trainer_name == "standard":
         return StandardTrainer
     elif trainer_name == "shared_epsilon":
+        assert args.seq_len > 1, "Shared epsilon trainer only supports seq_len > 1"
         return SharedEpsilonTrainer
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 

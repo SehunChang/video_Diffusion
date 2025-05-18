@@ -23,6 +23,7 @@ class StandardTrainer(BaseTrainer):
             data_iter = enumerate(dataloader)
             
         for step, (images, labels) in data_iter:
+
             assert (images.max().item() <= 1) and (0 <= images.min().item())
 
             # must use [-1, 1] pixel range for images
