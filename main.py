@@ -305,8 +305,13 @@ class TrainingLogger:
             args: Training arguments
         """
         self.args = args
-        self.setup_directories()
-        self.setup_logging()
+        # Skip directory setup if we're only sampling
+        if not args.sampling_only:
+            self.setup_directories()
+            self.setup_logging()
+        else:
+            # Just ensure the save_dir exists for sampling
+            os.makedirs(args.save_dir, exist_ok=True)
         
     def setup_directories(self):
         """Create necessary directories for training."""
@@ -456,7 +461,9 @@ def main():
 
     # Initialize logger
     logger = TrainingLogger(args)
-    logger.log_info(f"Starting training with args: {args}")
+    # Only log the args if not in sampling mode
+    if not args.sampling_only and args.local_rank == 0:
+        logger.log_info(f"Starting training with args: {args}")
 
     # Create model and diffusion process
     model = get_architecture(
@@ -496,8 +503,6 @@ def main():
 
     # sampling
     if args.sampling_only:
-        # Determine output directory
-        out_dir = args.sample_out_dir if args.sample_out_dir is not None else args.save_dir
         sample_N_images(
             args.num_sampled_images,
             model,
@@ -509,7 +514,7 @@ def main():
             metadata.image_size,
             metadata.num_classes,
             args,
-            save_dir=out_dir,
+            save_dir=args.save_dir,  # Use save_dir directly
             resume=True,
         )
         return
