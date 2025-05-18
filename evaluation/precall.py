@@ -13,6 +13,7 @@ from torchvision.datasets import ImageFolder
 from torch.utils.data import DataLoader
 from PIL import Image
 from tqdm import tqdm
+from utils import resolve_folder_path
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -38,7 +39,8 @@ def extract_features(images, model, batch_size=50):
         feats.append(x.cpu().numpy())
     return np.concatenate(feats, axis=0)
 
-def extract_features_from_folder(path, model, batch_size=50):
+def extract_features_from_folder(path, model, num_samples = None, batch_size=50):
+    path = resolve_folder_path(path)
     tfm = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
@@ -46,6 +48,9 @@ def extract_features_from_folder(path, model, batch_size=50):
                              [0.229, 0.224, 0.225])
     ])
     ds = ImageFolder(path, transform=tfm)
+    if num_samples is not None:
+        ds.samples = ds.samples[:num_samples]
+
     loader = DataLoader(ds, batch_size=batch_size, shuffle=False)
     feats = []
     model.eval()
@@ -76,13 +81,15 @@ def compute_precision_recall(real_feats, fake_feats, real_r, fake_r):
     return precision, recall
 # -------------------------------------------------------------- #
 
-def evaluate(fake_images, real_image_dir) -> dict[str, float]:
+def evaluate(fake_images, real_image_dir,n_fake=None,n_real=None) -> dict[str, float]:
     model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_FEATURES).to(device)
-
+    # fake 이미지 개수 제한
+    if n_fake is not None and n_fake < len(fake_images):
+        fake_images = fake_images[:n_fake]
     fake_proc = preprocess_images(fake_images.to(device))
     fake_feats = extract_features(fake_proc, model)
 
-    real_feats = extract_features_from_folder(real_image_dir, model)
+    real_feats = extract_features_from_folder(real_image_dir, model,num_samples=n_real)
     real_r, fake_r = compute_radii(real_feats), compute_radii(fake_feats)
     p, r = compute_precision_recall(real_feats, fake_feats, real_r, fake_r)
     return {"Precision": float(p), "Recall": float(r)}
