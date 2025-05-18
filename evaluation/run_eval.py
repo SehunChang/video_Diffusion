@@ -48,10 +48,10 @@ def main(fake_dir: str, real_dir: str, out_csv: str, n_fake:int, n_real:int):
 
     # 각 모듈의 evaluate()는 dict 를 반환하도록 통일
     metrics: Dict[str, float] = {}
-    #for module in (ev_fid, ev_pr,ev_aes):
-    #    metrics.update(module.evaluate(fake_imgs, real_dir))
-    for module in (ev_fid, ev_pr):
-        metrics.update(module.evaluate(fake_imgs, real_dir, n_fake=n_fake, n_real=n_real))
+    for module in (ev_fid, ev_pr,ev_aes):
+        metrics.update(module.evaluate(fake_imgs, real_dir))
+    #for module in (ev_fid, ev_pr):
+    #    metrics.update(module.evaluate(fake_imgs, real_dir, n_fake=n_fake, n_real=n_real))
 
     # CSV 저장
     with open(out_csv, "w", newline="") as f:
