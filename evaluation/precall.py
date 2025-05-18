@@ -40,7 +40,7 @@ def extract_features(images, model, batch_size=50):
     return np.concatenate(feats, axis=0)
 
 def extract_features_from_folder(path, model, num_samples = None, batch_size=50):
-    path = resolve_folder_path(path)
+    #path = resolve_folder_path(path)
     tfm = transforms.Compose([
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
