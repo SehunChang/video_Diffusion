@@ -449,6 +449,7 @@ def main():
     parser.add_argument("--local_rank", default=0, type=int)
     parser.add_argument("--seed", default=112233, type=int)
     parser.add_argument("--save-every", type=int, default=1, help="Save model every n epochs")
+    parser.add_argument("--resume", type=str, help="Path to checkpoint to resume training from")
 
     # setup
     args = parser.parse_args()
@@ -478,10 +479,37 @@ def main():
     diffusion = GuassianDiffusion(args.diffusion_steps, args.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-    # load pre-trained model
-    if args.pretrained_ckpt:
+    # load pre-trained model or resume from checkpoint
+    start_epoch = 0
+    if args.resume:
+        logger.log_info(f"Resuming from checkpoint: {args.resume}")
+        checkpoint = torch.load(args.resume, map_location=args.device)
+        
+        # Load model state
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            # New checkpoint format with training state
+            model.load_state_dict(checkpoint['model_state_dict'])
+            if 'optimizer_state_dict' in checkpoint:
+                optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if 'epoch' in checkpoint:
+                start_epoch = checkpoint['epoch']
+            if 'ema_dict' in checkpoint:
+                args.ema_dict = checkpoint['ema_dict']
+            logger.log_info(f"Resuming from epoch {start_epoch}")
+        else:
+            # Legacy format - just model state
+            model.load_state_dict(checkpoint)
+            logger.log_info("Loaded legacy checkpoint format")
+    elif args.pretrained_ckpt:
         logger.log_info(f"Loading pretrained model from {args.pretrained_ckpt}")
-        d = fix_legacy_dict(torch.load(args.pretrained_ckpt, map_location=args.device))
+        checkpoint = torch.load(args.pretrained_ckpt, map_location=args.device)
+        
+        # Handle both new and legacy checkpoint formats
+        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+            d = checkpoint['model_state_dict']
+        else:
+            d = fix_legacy_dict(checkpoint)
+            
         dm = model.state_dict()
         if args.delete_keys:
             for k in args.delete_keys:
@@ -544,9 +572,9 @@ def main():
     trainer = trainer_class(model, diffusion, args)
     
     # Start training
-    epoch_iter = range(args.epochs)
+    epoch_iter = range(start_epoch, args.epochs)
     if args.local_rank == 0:
-        epoch_iter = tqdm(epoch_iter, desc='Epochs', total=args.epochs)
+        epoch_iter = tqdm(epoch_iter, desc='Epochs', total=args.epochs - start_epoch)
     for epoch in epoch_iter:
         if sampler is not None:
             sampler.set_epoch(epoch)
@@ -573,7 +601,12 @@ def main():
         if args.local_rank == 0 and (epoch + 1) % args.save_every == 0:
             # Save regular checkpoint
             checkpoint_path = logger.get_checkpoint_path(epoch + 1)
-            torch.save(model.state_dict(), checkpoint_path)
+            torch.save({
+                'epoch': epoch + 1,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'ema_dict': args.ema_dict,
+            }, checkpoint_path)
             logger.log_info(f"Saved checkpoint to {checkpoint_path}")
             
             # Save EMA checkpoint

@@ -77,8 +77,8 @@
 #     --arch UNet --dataset gtsrb --class-cond --epochs 500 --batch-size 256 --sampling-steps 100 \
 #     --data-dir ~/datasets/misc/gtsrb/GTSRB/Final_Training/Images/
 
-CUDA_VISIBLE_DEVICES=4,5,6,7 python -m torch.distributed.launch --nproc_per_node=4 --master_port 8101 main.py \
-    --arch unet \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
+    --arch unet_small \
     --dataset hanco \
     --trainer standard \
     --epochs 500 \
@@ -90,4 +90,3 @@ CUDA_VISIBLE_DEVICES=4,5,6,7 python -m torch.distributed.launch --nproc_per_node
     --seq-len 1 \
     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
     --save-dir /media/data3/juhun/diffusion+/ckpts
-

@@ -78,7 +78,7 @@
 #     --data-dir ~/datasets/misc/gtsrb/GTSRB/Final_Training/Images/
 
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
-    --arch unet \
+    --arch unet_small \
     --dataset hanco \
     --trainer shared_epsilon \
     --epochs 500 \
