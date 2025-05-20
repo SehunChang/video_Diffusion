@@ -315,10 +315,15 @@ class TrainingLogger:
         
     def setup_directories(self):
         """Create necessary directories for training."""
-        # Create timestamp-based run directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_name = f"{self.args.arch}_{self.args.dataset}_{timestamp}"
-        self.run_dir = os.path.join(self.args.save_dir, run_name)
+        if self.args.resume:
+            # Use the existing run directory from the checkpoint
+            self.run_dir = get_base_dir_from_checkpoint(self.args.resume)
+            self.log_info(f"Using existing run directory: {self.run_dir}")
+        else:
+            # Create new timestamp-based run directory
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            run_name = f"{self.args.arch}_{self.args.dataset}_{timestamp}"
+            self.run_dir = os.path.join(self.args.save_dir, run_name)
         
         # Create subdirectories
         self.checkpoint_dir = os.path.join(self.run_dir, "checkpoints")
@@ -374,6 +379,20 @@ class TrainingLogger:
             self.checkpoint_dir,
             f"checkpoint_epoch_{epoch}_ema.pt"
         )
+
+
+def get_base_dir_from_checkpoint(checkpoint_path):
+    """Extract the base directory from a checkpoint path.
+    
+    Args:
+        checkpoint_path: Path to the checkpoint file
+        
+    Returns:
+        Base directory containing the checkpoint (parent of checkpoints directory)
+    """
+    # Remove the filename and 'checkpoints' directory
+    base_dir = os.path.dirname(os.path.dirname(checkpoint_path))
+    return base_dir
 
 
 def main():
@@ -485,12 +504,19 @@ def main():
     start_epoch = 0
     if args.resume:
         logger.log_info(f"Resuming from checkpoint: {args.resume}")
+        # Get the base directory from the checkpoint path
+        base_dir = get_base_dir_from_checkpoint(args.resume)
+        logger.log_info(f"Base directory: {base_dir}")
         checkpoint = torch.load(args.resume, map_location=args.device)
         
         # Load model state
         if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
             # New checkpoint format with training state
-            model.load_state_dict(checkpoint['model_state_dict'])
+            state_dict = checkpoint['model_state_dict']
+            # Remove 'module.' prefix if present
+            state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+            model.load_state_dict(state_dict)
+            
             if 'optimizer_state_dict' in checkpoint:
                 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             if 'epoch' in checkpoint:
@@ -500,7 +526,8 @@ def main():
             logger.log_info(f"Resuming from epoch {start_epoch}")
         else:
             # Legacy format - just model state
-            model.load_state_dict(checkpoint)
+            state_dict = {k.replace('module.', ''): v for k, v in checkpoint.items()}
+            model.load_state_dict(state_dict)
             logger.log_info("Loaded legacy checkpoint format")
     elif args.pretrained_ckpt:
         logger.log_info(f"Loading pretrained model from {args.pretrained_ckpt}")

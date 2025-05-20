@@ -4,7 +4,7 @@ paths = [
         # "/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250518_150858/gen_250/online",
         #  "/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250519_005719/gen250",
         #  "/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250519_005719/gen500",
-         "/media/data3/juhun/diffusion+/ckpts/unet_small_hanco_20250519_141326/gen250"]
+         "/media/data3/juhun/diffusion+/ckpts/unet_small_hanco_20250519_141326/gen500"]
 
 for path in paths:
     score_train = fid.compute_fid(path, dataset_name='camfilter_50k_train',
