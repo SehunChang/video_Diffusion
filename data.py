@@ -53,7 +53,8 @@ def get_dataset(name, data_dir, metadata, args):
                 flow_root=args.motion_dir,        # motion csv들이 들어있는 상위 디렉토리
                 seq_len=args.seq_len,                         # 중심 + 좌우 1프레임씩
                 transform=transform_train,
-                num_training_data=args.num_training_data
+                num_training_data=args.num_training_data,
+                use_normalized_flow=args.use_normalized_flow
             )
     else:
         raise ValueError(f"{name} dataset nor supported!")
@@ -79,13 +80,14 @@ def fix_legacy_dict(d):
 
 # Dataset class for handling multi-camera video sequences with optical flow data
 class MultiCamVideoDataset(Dataset):
-    def __init__(self, video_root, flow_root, seq_len=3, transform=None, num_training_data=None):
+    def __init__(self, video_root, flow_root, seq_len=3, transform=None, num_training_data=None, use_normalized_flow=False):
         self.video_root = video_root  # e.g., "preprocessed_v2"
         self.flow_root = flow_root    # e.g., "all_motion_csv"
         self.seq_len = seq_len        # must be odd (e.g., 3, 5, 7)
         self.half = seq_len // 2
         self.transform = transform
         self.num_training_data = num_training_data
+        self.use_normalized_flow = use_normalized_flow
 
         assert seq_len % 2 == 1, "Sequence length must be odd (e.g., 3, 5, 7)"
         
@@ -130,7 +132,9 @@ class MultiCamVideoDataset(Dataset):
         # Iterate through each video directory
         for video_id in sorted(os.listdir(self.video_root)):
             video_path = os.path.join(self.video_root, video_id)
-            motion_csv_path = os.path.join(self.flow_root, video_id, f"{video_id}_motion.csv")
+
+            suffix = "motion_norm_O.csv" if self.use_normalized_flow else "motion_norm_X.csv"
+            motion_csv_path = os.path.join(self.flow_root, video_id, f"{video_id}_{suffix}")
 
             # Skip if motion data not available
             if not os.path.exists(motion_csv_path):

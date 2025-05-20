@@ -435,6 +435,8 @@ def main():
         help="Number of images required to sample from the model",
     )
     parser.add_argument("--seq-len", type=int, default=1, help="Number of frames in each sequence")
+    parser.add_argument("--use_normalized_flow", type=bool, default=True, help="Use normalized optical flow CSV")
+
     # trainer selection
     parser.add_argument(
         "--trainer", 

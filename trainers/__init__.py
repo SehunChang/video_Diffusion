@@ -23,3 +23,5 @@ def get_trainer(trainer_name,args):
         return SharedEpsilonTrainer
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 
+    
+# python train.py --arch unet --dataset hanco --data-dir /path/to/preprocessed_v2 --motion-dir /path/to/all_motion_csv --seq-len 3 --use_normalized_flow True --batch-size 64 --epochs 100 --save-dir ./trained_models/my_run --trainer standard
