@@ -454,7 +454,12 @@ def main():
         help="Number of images required to sample from the model",
     )
     parser.add_argument("--seq-len", type=int, default=1, help="Number of frames in each sequence")
-    parser.add_argument("--use_normalized_flow", type=bool, default=True, help="Use normalized optical flow CSV")
+    parser.add_argument("--use_normalized_flow", action="store_true", help="Use normalized optical flow CSV")
+    # parser.add_argument("--use_flow_weighting", type=bool, default=True, 
+    #                   help="Whether to use flow-based weighting for regularization loss in shared_epsilon trainer")
+
+    # Add argument to accept any trainer-specific arguments
+    parser.add_argument('--trainer_*', action='append', nargs='+', help='Trainer-specific arguments')
 
     # trainer selection
     parser.add_argument(
@@ -473,7 +478,34 @@ def main():
     parser.add_argument("--resume", type=str, help="Path to checkpoint to resume training from")
 
     # setup
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    
+    # Process unknown arguments that start with trainer_
+    trainer_kwargs = {}
+    for arg in unknown:
+        if arg.startswith('--trainer_'):
+            prefix, *rest = arg.split('--trainer_')
+            key = rest[0]  # Get the part after --trainer_
+            value = True  # Default to True for flags
+            if '=' in key:
+                key, value = key.split('=')
+                # Try to convert value to appropriate type
+                try:
+                    value = int(value)
+                except ValueError:
+                    try:
+                        value = float(value)
+                    except ValueError:
+                        if value.lower() == 'true':
+                            value = True
+                        elif value.lower() == 'false':
+                            value = False
+            else:
+            # If no value is provided, raise an error since we need a value for trainer-specific arguments
+                raise ValueError(f"No value provided for trainer argument: {key}")
+            print(f"key: {key}, value: {value}")
+            trainer_kwargs[key] = value
+    
     metadata = get_metadata(args.dataset)
     torch.backends.cudnn.benchmark = True
     args.device = "cuda:{}".format(args.local_rank)
@@ -486,6 +518,8 @@ def main():
     # Only log the args if not in sampling mode
     if not args.sampling_only and args.local_rank == 0:
         logger.log_info(f"Starting training with args: {args}")
+        if trainer_kwargs:
+            logger.log_info(f"Trainer-specific args: {trainer_kwargs}")
 
     # Create model and diffusion process
     model = get_architecture(
@@ -598,7 +632,11 @@ def main():
     
     # Initialize the trainer
     trainer_class = get_trainer(args.trainer, args)
-    trainer = trainer_class(model, diffusion, args)
+    
+    # Get all arguments that start with 'trainer_'
+    trainer_kwargs = {k[8:]: v for k, v in vars(args).items() if k.startswith('trainer_')}
+    
+    trainer = trainer_class(model, diffusion, args, **trainer_kwargs)
     
     # Start training
     epoch_iter = range(start_epoch, args.epochs)

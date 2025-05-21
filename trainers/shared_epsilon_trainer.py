@@ -5,6 +5,24 @@ from .base_trainer import BaseTrainer
 class SharedEpsilonTrainer(BaseTrainer):
     """Trainer for diffusion models with shared epsilon across frames."""
     
+    def __init__(self, model, diffusion, args, **kwargs):
+        """
+        Initialize the trainer.
+        
+        Args:
+            model: The model to train
+            diffusion: The diffusion process
+            args: Training arguments
+            **kwargs: Additional trainer-specific arguments that can be accessed via self.trainer_args
+        """
+        super().__init__(model, diffusion, args)
+        # Store all kwargs as trainer-specific arguments
+        self.trainer_args = kwargs
+        
+        # Set default values for common arguments
+        self.use_flow_weighting = kwargs.get('use_flow_weighting', True)
+        self.flow_weight_scale = kwargs.get('flow_weight_scale', 1.0)  # Example of a new dynamic argument
+    
     def train_one_epoch(self, dataloader, optimizer, logger, lrs):
         """Train for one epoch using the shared epsilon training approach."""
         self.model.train()
@@ -52,11 +70,16 @@ class SharedEpsilonTrainer(BaseTrainer):
             eps_diff_0_1 = ((pred_eps[:, 0] - pred_eps[:, 1]) ** 2).mean(dim=[1, 2, 3])
             eps_diff_1_2 = ((pred_eps[:, 1] - pred_eps[:, 2]) ** 2).mean(dim=[1, 2, 3])
             
-            flow_weight_0_1 = 1.0 / (1.0 + optical_flow[:, 0])
-            flow_weight_1_2 = 1.0 / (1.0 + optical_flow[:, 1])
-            
-            weighted_eps_diff_0_1 = (eps_diff_0_1 * flow_weight_0_1).mean()
-            weighted_eps_diff_1_2 = (eps_diff_1_2 * flow_weight_1_2).mean()
+            if self.use_flow_weighting:
+                # Use flow_weight_scale from trainer_args
+                flow_weight_0_1 = self.flow_weight_scale / (1.0 + optical_flow[:, 0])
+                flow_weight_1_2 = self.flow_weight_scale / (1.0 + optical_flow[:, 1])
+                
+                weighted_eps_diff_0_1 = (eps_diff_0_1 * flow_weight_0_1).mean()
+                weighted_eps_diff_1_2 = (eps_diff_1_2 * flow_weight_1_2).mean()
+            else:
+                weighted_eps_diff_0_1 = eps_diff_0_1.mean()
+                weighted_eps_diff_1_2 = eps_diff_1_2.mean()
             
             reg_loss = weighted_eps_diff_0_1 + weighted_eps_diff_1_2
             
@@ -78,9 +101,14 @@ class SharedEpsilonTrainer(BaseTrainer):
                     self.args.ema_dict[k] = (
                         self.args.ema_w * self.args.ema_dict[k] + (1 - self.args.ema_w) * new_dict[k]
                     )
-                logger.log({
+                log_dict = {
                     'loss': loss.item(),
                     'reg_loss': reg_loss.item(),
-                    'flow_weight_0_1': flow_weight_0_1.mean().item(),
-                    'flow_weight_1_2': flow_weight_1_2.mean().item()
-                }, display=not step % 100)
+                }
+                if self.use_flow_weighting:
+                    log_dict.update({
+                        'flow_weight_0_1': flow_weight_0_1.mean().item(),
+                        'flow_weight_1_2': flow_weight_1_2.mean().item(),
+                        'flow_weight_scale': self.flow_weight_scale
+                    })
+                logger.log(log_dict, display=not step % 100)
