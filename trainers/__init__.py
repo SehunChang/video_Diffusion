@@ -1,9 +1,11 @@
 from .standard_trainer import StandardTrainer
 from .shared_epsilon_trainer import SharedEpsilonTrainer
+from .shared_epsilon_trainer_detach import SharedEpsilonTrainer_detach
 
 __all__ = [
     "StandardTrainer",
     "SharedEpsilonTrainer",
+    "SharedEpsilonTrainer_detach",
 ]
 
 def get_trainer(trainer_name,args):
@@ -21,6 +23,9 @@ def get_trainer(trainer_name,args):
     elif trainer_name == "shared_epsilon":
         assert args.seq_len > 1, "Shared epsilon trainer only supports seq_len > 1"
         return SharedEpsilonTrainer
+    elif trainer_name == "shared_epsilon_detach":
+        assert args.seq_len > 1, "Shared epsilon trainer only supports seq_len > 1"
+        return SharedEpsilonTrainer_detach
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 
     
