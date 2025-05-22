@@ -6,6 +6,8 @@ import numpy as np
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
+import torch
 
 
 class GroupNorm32(nn.GroupNorm):
@@ -906,6 +908,448 @@ def UNetSmall(
         use_fp16=False,
         num_heads=4,
         num_head_channels=32,
+        num_heads_upsample=-1,
+        use_scale_shift_norm=True,
+        resblock_updown=True,
+        use_new_attention_order=True,
+    )
+
+
+###
+class RelativePositionBias(nn.Module):
+    def __init__(self, heads=8, num_buckets=32, max_distance=128):
+        super().__init__()
+        self.num_buckets = num_buckets
+        self.max_distance = max_distance
+        self.relative_attention_bias = nn.Embedding(num_buckets, heads)
+
+    def _relative_position_bucket(self, relative_position):
+        num_buckets = self.num_buckets
+        max_distance = self.max_distance
+
+        ret = 0
+        n = -relative_position
+
+        num_buckets //= 2
+        ret += (n < 0).long() * num_buckets
+        n = torch.abs(n)
+
+        max_exact = num_buckets // 2
+        is_small = n < max_exact
+
+        val_if_large = max_exact + (
+            torch.log(n.float() / max_exact + 1e-8) / math.log(max_distance / max_exact) * (num_buckets - max_exact)
+        ).long()
+        val_if_large = torch.min(val_if_large, torch.full_like(val_if_large, num_buckets - 1))
+
+        ret += torch.where(is_small, n, val_if_large)
+        return ret
+
+    def forward(self, q_len, k_len, device):
+        q_pos = torch.arange(q_len, dtype=torch.long, device=device)
+        k_pos = torch.arange(k_len, dtype=torch.long, device=device)
+        rel_pos = rearrange(k_pos, 'j -> 1 j') - rearrange(q_pos, 'i -> i 1')
+        rp_bucket = self._relative_position_bucket(rel_pos)
+        values = self.relative_attention_bias(rp_bucket)
+        return rearrange(values, 'i j h -> h i j')
+
+
+class TemporalCrossAttention(nn.Module):
+    def __init__(self, dim, heads=8, dim_head=64):
+        super().__init__()
+        self.heads = heads
+        self.scale = dim_head ** -0.5
+        inner_dim = dim_head * heads
+
+        self.to_q = nn.Linear(dim, inner_dim, bias=False)
+        self.to_kv = nn.Linear(dim, inner_dim * 2, bias=False)
+        self.to_out = nn.Linear(inner_dim, dim)
+        self.rel_pos = RelativePositionBias(heads=heads)
+
+    def forward(self, x_q, x_kv):
+        B, T_q, C = x_q.shape
+        T_k = x_kv.shape[1]
+
+        q = self.to_q(x_q)
+        k, v = self.to_kv(x_kv).chunk(2, dim=-1)
+
+        q = rearrange(q, 'b t (h d) -> b h t d', h=self.heads)
+        k = rearrange(k, 'b t (h d) -> b h t d', h=self.heads)
+        v = rearrange(v, 'b t (h d) -> b h t d', h=self.heads)
+
+        q = q * self.scale
+        sim = torch.einsum('b h i d, b h j d -> b h i j', q, k)
+
+        rel_bias = self.rel_pos(T_q, T_k, x_q.device)  # (h, T_q, T_k)
+        sim = sim + rel_bias.unsqueeze(0)              # (1, h, T_q, T_k)
+
+        attn = sim.softmax(dim=-1)
+        out = torch.einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = rearrange(out, 'b h t d -> b t (h d)')
+
+        return self.to_out(out), attn, rel_bias
+
+
+class TemporalCrossAttentionBlock(nn.Module):
+    def __init__(self, dim, heads=8, dim_head=64):
+        super().__init__()
+        self.attn = TemporalCrossAttention(dim, heads, dim_head)
+
+    def forward(self, x, return_attn=False, return_rel_pos=False):
+        # x: (B, C, T, H, W)
+        B, C, T, H, W = x.shape
+        assert T == 3, "Expected 3-frame input"
+
+        x = x.permute(0, 2, 1, 3, 4)  # (B, T, C, H, W)
+        x = x.mean(dim=[3, 4])        # (B, T, C)
+
+        x1 = x[:, 0:1]  # (B, 1, C) ← query
+        x2 = x[:, 1:2]  # (B, 1, C) ← key/value
+        x3 = x[:, 2:3]  # (B, 1, C) ← query
+
+        # x1 attends to x2
+        out1, attn_weights_1, rel_bias_1 = self.attn(x1, x2)
+
+        # x3 attends to x2
+        out3, attn_weights_3, rel_bias_3 = self.attn(x3, x2)
+
+        # Broadcast outputs
+        out1 = out1.permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
+        out3 = out3.permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
+
+        # Original feature maps for x1, x3
+        x1_orig = x[:, 0:1].permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
+        x3_orig = x[:, 2:3].permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
+
+        # Updated x1, x3
+        x1_updated = x1_orig + out1
+        x3_updated = x3_orig + out3
+        x2_unchanged = x[:, 1:2].permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
+
+        x_out = torch.cat([x1_updated, x2_unchanged, x3_updated], dim=2)  # (B, C, T, H, W)
+
+        if return_attn or return_rel_pos:
+            return x_out, {
+                'attn_weights_1': attn_weights_1 if return_attn else None,
+                'attn_weights_3': attn_weights_3 if return_attn else None,
+                'rel_pos_bias_1': rel_bias_1 if return_rel_pos else None,
+                'rel_pos_bias_3': rel_bias_3 if return_rel_pos else None
+            }
+        else:
+            return x_out, None
+
+
+class UNetModel_AAT(nn.Module):
+
+    def __init__(
+        self,
+        image_size,
+        in_channels,
+        model_channels,
+        out_channels,
+        num_res_blocks,
+        attention_resolutions,
+        time_emb_factor=4,
+        dropout=0,
+        channel_mult=(1, 2, 4, 8),
+        conv_resample=True,
+        dims=2,
+        num_classes=None,
+        use_checkpoint=False,
+        use_fp16=False,
+        num_heads=1,
+        num_head_channels=-1,
+        num_heads_upsample=-1,
+        use_scale_shift_norm=False,
+        resblock_updown=False,
+        use_new_attention_order=False,
+        seq_len = 3
+    ):
+        super().__init__()
+        
+        if num_heads_upsample == -1:
+            num_heads_upsample = num_heads
+
+        self.image_size = image_size
+        self.in_channels = in_channels
+        self.model_channels = model_channels
+        self.out_channels = out_channels
+        self.num_res_blocks = num_res_blocks
+        self.attention_resolutions = attention_resolutions
+        self.dropout = dropout
+        self.channel_mult = channel_mult
+        self.conv_resample = conv_resample
+        self.num_classes = num_classes
+        self.use_checkpoint = use_checkpoint
+        self.dtype = th.float16 if use_fp16 else th.float32
+        self.num_heads = num_heads
+        self.num_head_channels = num_head_channels
+        self.num_heads_upsample = num_heads_upsample
+
+        self.seq_len = seq_len
+
+        time_embed_dim = model_channels * time_emb_factor
+        self.time_embed = nn.Sequential(
+            linear(model_channels, time_embed_dim),
+            nn.SiLU(),
+            linear(time_embed_dim, time_embed_dim),
+        )
+
+        self.temporal_label_emb = nn.Embedding(seq_len, time_embed_dim)
+
+        if self.num_classes is not None:
+            self.label_emb = nn.Embedding(num_classes, time_embed_dim)
+
+        ch = input_ch = int(channel_mult[0] * model_channels)
+        self.input_blocks = nn.ModuleList(
+            [TimestepEmbedSequential(conv_nd(dims, in_channels, ch, 3, padding=1))]
+        )
+        self._feature_size = ch
+        input_block_chans = [ch]
+        ds = 1
+        for level, mult in enumerate(channel_mult):
+            for _ in range(num_res_blocks):
+                layers = [
+                    ResBlock(
+                        ch,
+                        time_embed_dim,
+                        dropout,
+                        out_channels=int(mult * model_channels),
+                        dims=dims,
+                        use_checkpoint=use_checkpoint,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                    )
+                ]
+                ch = int(mult * model_channels)
+                if ds in attention_resolutions:
+                    layers.append(
+                        AttentionBlock(
+                            ch,
+                            use_checkpoint=use_checkpoint,
+                            num_heads=num_heads,
+                            num_head_channels=num_head_channels,
+                            use_new_attention_order=use_new_attention_order,
+                        )
+                    )
+                self.input_blocks.append(TimestepEmbedSequential(*layers))
+                self._feature_size += ch
+                input_block_chans.append(ch)
+            if level != len(channel_mult) - 1:
+                out_ch = ch
+                self.input_blocks.append(
+                    TimestepEmbedSequential(
+                        ResBlock(
+                            ch,
+                            time_embed_dim,
+                            dropout,
+                            out_channels=out_ch,
+                            dims=dims,
+                            use_checkpoint=use_checkpoint,
+                            use_scale_shift_norm=use_scale_shift_norm,
+                            down=True,
+                        )
+                        if resblock_updown
+                        else Downsample(
+                            ch, conv_resample, dims=dims, out_channels=out_ch
+                        )
+                    )
+                )
+                ch = out_ch
+                input_block_chans.append(ch)
+                ds *= 2
+                self._feature_size += ch
+
+        self.middle_block = TimestepEmbedSequential(
+            ResBlock(
+                ch,
+                time_embed_dim,
+                dropout,
+                dims=dims,
+                use_checkpoint=use_checkpoint,
+                use_scale_shift_norm=use_scale_shift_norm,
+            ),
+            TemporalCrossAttentionBlock(
+                ch,
+                num_heads
+            ),
+            AttentionBlock(
+                ch,
+                use_checkpoint=use_checkpoint,
+                num_heads=num_heads,
+                num_head_channels=num_head_channels,
+                use_new_attention_order=use_new_attention_order,
+            ),
+            ResBlock(
+                ch,
+                time_embed_dim,
+                dropout,
+                dims=dims,
+                use_checkpoint=use_checkpoint,
+                use_scale_shift_norm=use_scale_shift_norm,
+            ),
+        )
+        self._feature_size += ch
+
+        self.output_blocks = nn.ModuleList([])
+        for level, mult in list(enumerate(channel_mult))[::-1]:
+            for i in range(num_res_blocks + 1):
+                ich = input_block_chans.pop()
+                layers = [
+                    ResBlock(
+                        ch + ich,
+                        time_embed_dim,
+                        dropout,
+                        out_channels=int(model_channels * mult),
+                        dims=dims,
+                        use_checkpoint=use_checkpoint,
+                        use_scale_shift_norm=use_scale_shift_norm,
+                    )
+                ]
+                ch = int(model_channels * mult)
+                if ds in attention_resolutions:
+                    layers.append(
+                        AttentionBlock(
+                            ch,
+                            use_checkpoint=use_checkpoint,
+                            num_heads=num_heads_upsample,
+                            num_head_channels=num_head_channels,
+                            use_new_attention_order=use_new_attention_order,
+                        )
+                    )
+                if level and i == num_res_blocks:
+                    out_ch = ch
+                    layers.append(
+                        ResBlock(
+                            ch,
+                            time_embed_dim,
+                            dropout,
+                            out_channels=out_ch,
+                            dims=dims,
+                            use_checkpoint=use_checkpoint,
+                            use_scale_shift_norm=use_scale_shift_norm,
+                            up=True,
+                        )
+                        if resblock_updown
+                        else Upsample(ch, conv_resample, dims=dims, out_channels=out_ch)
+                    )
+                    ds //= 2
+                self.output_blocks.append(TimestepEmbedSequential(*layers))
+                self._feature_size += ch
+
+        self.out = nn.Sequential(
+            normalization(ch),
+            nn.SiLU(),
+            zero_module(conv_nd(dims, input_ch, out_channels, 3, padding=1)),
+        )
+    def forward(self, x, timesteps, y=None, labels=None, return_attn=False, return_rel_pos=False):
+        """
+        Apply the model to an input batch.
+        :param x: an [N x C x H x W] Tensor of inputs (flattened frames).
+        :param timesteps: a 1-D batch of timesteps.
+        :param y: an [N] Tensor of labels, if class-conditional.
+        :param labels: temporal frame indices (optional).
+        :return: output and optionally attention info dict.
+        """
+        assert (y is not None) == (
+            self.num_classes is not None
+        ), "must specify y if and only if the model is class-conditional"
+
+        if labels is not None:
+            self.temporal_labels = labels
+
+        hs = []
+        emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
+
+        if labels is not None:
+            emb = emb + self.temporal_label_emb(labels)
+
+        if self.num_classes is not None:
+            emb = emb + self.label_emb(y)
+
+        h = x.type(self.dtype)
+
+        # Input blocks
+        for module in self.input_blocks:
+            h = module(h, emb)
+            hs.append(h)
+
+        # ---- Middle block ----
+        # Reshape for TemporalAttentionBlock: (B*T, C, H, W) → (B, C, T, H, W)
+        B = h.shape[0] // self.seq_len  # self.seq_len must be set correctly in model
+        C, H, W = h.shape[1:]
+        h_5d = h.view(B, self.seq_len, C, H, W).permute(0, 2, 1, 3, 4).contiguous()
+
+        attn_info = {}
+        h_5d, mid_info = self.middle_block[1](h_5d, return_rel_pos=return_rel_pos, return_attn=return_attn)
+        # x2_out, mid_info = self.middle_block[1](h_5d, return_rel_pos=return_rel_pos, return_attn=return_attn)
+        # h_5d[:, :, 1:2] = x2_out
+
+        # Reshape back to (B*T, C, H, W)
+        h = h_5d.permute(0, 2, 1, 3, 4).contiguous().view(B * self.seq_len, C, H, W)
+
+        h = self.middle_block[0](h, emb)
+        h = self.middle_block[2](h)
+        h = self.middle_block[3](h, emb)
+
+        if return_attn or return_rel_pos:
+            if mid_info is not None:
+                attn_info = {
+                    'attn_weights': mid_info.get('attn_weights'),
+                    'rel_pos_bias': mid_info.get('rel_pos_bias')
+                }
+
+        # Output blocks
+        for module in self.output_blocks:
+            h = th.cat([h, hs.pop()], dim=1)
+            h = module(h, emb)
+
+        h = h.type(x.dtype)
+
+        if return_attn or return_rel_pos:
+            return self.out(h), attn_info
+        else:
+            return self.out(h)
+        
+def UNet_AAT(
+    image_size,
+    in_channels=3,
+    out_channels=3,
+    base_width=64,
+    num_classes=None,
+):
+    if image_size == 128:
+        channel_mult = (1, 1, 2, 3, 4)
+    elif image_size == 64:
+        channel_mult = (1, 2, 3, 4)
+    elif image_size == 32:
+        channel_mult = (1, 2, 2, 2)
+    elif image_size == 28:
+        channel_mult = (1, 2, 2, 2)
+    else:
+        raise ValueError(f"unsupported image size: {image_size}")
+
+    attention_ds = []
+    if image_size == 28:
+        attention_resolutions = "28,14,7"
+    else:
+        attention_resolutions = "32,16,8"
+    for res in attention_resolutions.split(","):
+        attention_ds.append(image_size // int(res))
+
+    return UNetModel_AAT(
+        image_size=image_size,
+        in_channels=in_channels,
+        model_channels=base_width,
+        out_channels=out_channels,
+        num_res_blocks=3,
+        attention_resolutions=tuple(attention_ds),
+        dropout=0.1,
+        channel_mult=channel_mult,
+        num_classes=num_classes,
+        use_checkpoint=False,
+        use_fp16=False,
+        num_heads=4,
+        num_head_channels=64,
         num_heads_upsample=-1,
         use_scale_shift_norm=True,
         resblock_updown=True,

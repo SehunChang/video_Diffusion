@@ -1,4 +1,4 @@
-from .unets import UNet, UNetBig, UNetSmall, UNetModel
+from .unets import UNet, UNetBig, UNetSmall, UNetModel, UNet_AAT
 
 __all__ = [
     "UNet",
@@ -26,5 +26,7 @@ def get_architecture(arch_name, **kwargs):
         return UNetSmall(**kwargs)
     elif arch_name == "unet_custom":
         return UNetModel(**kwargs)
+    elif arch_name == "unet_aat":
+        return UNet_AAT(**kwargs)
     else:
         raise ValueError(f"Unknown architecture: {arch_name}") 

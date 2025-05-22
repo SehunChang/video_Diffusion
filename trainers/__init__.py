@@ -1,6 +1,7 @@
 from .standard_trainer import StandardTrainer
 from .shared_epsilon_trainer import SharedEpsilonTrainer
 from .shared_epsilon_trainer_detach import SharedEpsilonTrainer_detach
+from .adjacent_attention_trainer import AdjacentAttentionTrainer
 
 __all__ = [
     "StandardTrainer",
@@ -26,7 +27,9 @@ def get_trainer(trainer_name,args):
     elif trainer_name == "shared_epsilon_detach":
         assert args.seq_len > 1, "Shared epsilon trainer only supports seq_len > 1"
         return SharedEpsilonTrainer_detach
+    elif trainer_name == "adjacent_attention":
+        assert args.seq_len > 1, "Shared epsilon trainer only supports seq_len > 1"
+        return AdjacentAttentionTrainer
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 
     
-# python train.py --arch unet --dataset hanco --data-dir /path/to/preprocessed_v2 --motion-dir /path/to/all_motion_csv --seq-len 3 --use_normalized_flow True --batch-size 64 --epochs 100 --save-dir ./trained_models/my_run --trainer standard

@@ -54,7 +54,8 @@ def get_dataset(name, data_dir, metadata, args):
                 seq_len=args.seq_len,                         # 중심 + 좌우 1프레임씩
                 transform=transform_train,
                 num_training_data=args.num_training_data,
-                use_normalized_flow=args.use_normalized_flow
+                use_normalized_flow=args.use_normalized_flow,
+                args=args
             )
     else:
         raise ValueError(f"{name} dataset nor supported!")
@@ -80,7 +81,7 @@ def fix_legacy_dict(d):
 
 # Dataset class for handling multi-camera video sequences with optical flow data
 class MultiCamVideoDataset(Dataset):
-    def __init__(self, video_root, flow_root, seq_len=3, transform=None, num_training_data=None, use_normalized_flow=False):
+    def __init__(self, video_root, flow_root, seq_len=3, transform=None, num_training_data=None, use_normalized_flow=False, args=None):
         self.video_root = video_root  # e.g., "preprocessed_v2"
         self.flow_root = flow_root    # e.g., "all_motion_csv"
         self.seq_len = seq_len        # must be odd (e.g., 3, 5, 7)
@@ -88,6 +89,7 @@ class MultiCamVideoDataset(Dataset):
         self.transform = transform
         self.num_training_data = num_training_data
         self.use_normalized_flow = use_normalized_flow
+        self.args = args
 
         assert seq_len % 2 == 1, "Sequence length must be odd (e.g., 3, 5, 7)"
         
@@ -190,5 +192,10 @@ class MultiCamVideoDataset(Dataset):
         # Get the corresponding flow differences
         flow_diffs = self.all_flow_diffs[cam_idx]
         flow_seq = flow_diffs[start_idx:end_idx-1]  # (seq_len-1,)
-        
-        return image_seq, flow_seq
+
+        # If trainer is adjacent_attention, return labels too
+        if hasattr(self.args, 'trainer') and self.args.trainer == "adjacent_attention":
+            labels = torch.arange(self.seq_len)  # [0, 1, 2] for seq_len=3
+            return image_seq, flow_seq, labels
+        else:
+            return image_seq, flow_seq
