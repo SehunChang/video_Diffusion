@@ -18,7 +18,7 @@ def get_metadata(name):
         metadata = EasyDict(
             {
                 "image_size": 64,
-                "num_classes": 1,
+                "num_classes": 3,
                 "train_images": 50000,
                 "val_images": 0,
                 "num_channels": 3,

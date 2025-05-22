@@ -53,8 +53,8 @@ class AdjacentAttentionTrainer(BaseTrainer):
             pred_eps_flat, extra = self.model(
                 xt_flat,
                 t_flat,
-                labels=temporal_index,
-                return_attn=True,
+                y=temporal_index,
+                return_attn=False,
                 return_rel_pos=self.use_relative_position
             )
 
@@ -66,53 +66,54 @@ class AdjacentAttentionTrainer(BaseTrainer):
             mse_loss = F.mse_loss(pred_eps, target_eps)
 
             # Attention supervision loss
-            attn_weights_1 = extra.get("attn_weights_1")
-            attn_weights_3 = extra.get("attn_weights_3")
+            # attn_weights_1 = extra.get("attn_weights_1")
+            # attn_weights_3 = extra.get("attn_weights_3")
 
-            attn_supervision_1 = torch.tensor(0.0, device=self.args.device)
-            attn_supervision_3 = torch.tensor(0.0, device=self.args.device)
+            # attn_supervision_1 = torch.tensor(0.0, device=self.args.device)
+            # attn_supervision_3 = torch.tensor(0.0, device=self.args.device)
 
-            if attn_weights_1 is not None and attn_weights_3 is not None:
-                B_attn, H, Q, K = attn_weights_1.shape
-                assert Q == 1 and K == 1, f"Expected [B, H, 1, 1], got {attn_weights_1.shape}"
+            # if attn_weights_1 is not None and attn_weights_3 is not None:
+            #     B_attn, H, Q, K = attn_weights_1.shape
+            #     assert Q == 1 and K == 1, f"Expected [B, H, 1, 1], got {attn_weights_1.shape}"
 
-                # x1 ← x2 → attention ground-truth = all attention to x2 (index 0)
-                attn_gt_1 = torch.ones_like(attn_weights_1)  # shape: [B, H, 1, 1]
-                attn_gt_3 = torch.ones_like(attn_weights_3)
+            #     # x1 ← x2 → attention ground-truth = all attention to x2 (index 0)
+            #     attn_gt_1 = torch.ones_like(attn_weights_1)  # shape: [B, H, 1, 1]
+            #     attn_gt_3 = torch.ones_like(attn_weights_3)
 
-                attn_supervision_1 = F.kl_div(attn_weights_1.log(), attn_gt_1, reduction="batchmean")
-                attn_supervision_3 = F.kl_div(attn_weights_3.log(), attn_gt_3, reduction="batchmean")
+            #     attn_supervision_1 = F.kl_div(attn_weights_1.log(), attn_gt_1, reduction="batchmean")
+            #     attn_supervision_3 = F.kl_div(attn_weights_3.log(), attn_gt_3, reduction="batchmean")
 
-            attn_supervision = (attn_supervision_1 + attn_supervision_3) / 2
+            # attn_supervision = (attn_supervision_1 + attn_supervision_3) / 2
 
             # Relative position bias loss
-            rel_pos_bias = extra.get('rel_pos_bias')
-            if self.use_relative_position and rel_pos_bias is not None:
-                if rel_pos_bias.dim() == 4:
-                    rel_target = rel_pos_bias[:, :, 0, 0] + rel_pos_bias[:, :, 0, 1]
-                elif rel_pos_bias.dim() == 3:
-                    rel_target = rel_pos_bias[:, 0, 0] + rel_pos_bias[:, 0, 1]
-                else:
-                    raise ValueError("Unexpected shape for rel_pos_bias")
-                rel_loss = (rel_target ** 2).mean()
-            else:
-                rel_loss = torch.tensor(0.0, device=self.args.device)
+            # rel_pos_bias = extra.get('rel_pos_bias')
+            # if self.use_relative_position and rel_pos_bias is not None:
+            #     if rel_pos_bias.dim() == 4:
+            #         rel_target = rel_pos_bias[:, :, 0, 0] + rel_pos_bias[:, :, 0, 1]
+            #     elif rel_pos_bias.dim() == 3:
+            #         rel_target = rel_pos_bias[:, 0, 0] + rel_pos_bias[:, 0, 1]
+            #     else:
+            #         raise ValueError("Unexpected shape for rel_pos_bias")
+            #     rel_loss = (rel_target ** 2).mean()
+            # else:
+            #     rel_loss = torch.tensor(0.0, device=self.args.device)
 
             # Flow-weighted regularization loss
-            if self.use_flow_weighting:
-                flow_weight_0_1 = self.flow_weight_scale / (1.0 + optical_flow[:, 0])
-                flow_weight_1_2 = self.flow_weight_scale / (1.0 + optical_flow[:, 1])
+            # if self.use_flow_weighting:
+            #     flow_weight_0_1 = self.flow_weight_scale / (1.0 + optical_flow[:, 0])
+            #     flow_weight_1_2 = self.flow_weight_scale / (1.0 + optical_flow[:, 1])
 
-                eps_diff_0_1 = ((pred_eps[:, 0] - pred_eps[:, 1]) ** 2).mean(dim=[1, 2, 3])
-                eps_diff_1_2 = ((pred_eps[:, 1] - pred_eps[:, 2]) ** 2).mean(dim=[1, 2, 3])
+            #     eps_diff_0_1 = ((pred_eps[:, 0] - pred_eps[:, 1]) ** 2).mean(dim=[1, 2, 3])
+            #     eps_diff_1_2 = ((pred_eps[:, 1] - pred_eps[:, 2]) ** 2).mean(dim=[1, 2, 3])
 
-                reg_loss = (eps_diff_0_1 * flow_weight_0_1 + eps_diff_1_2 * flow_weight_1_2).mean()
-            else:
-                reg_loss = torch.tensor(0.0, device=self.args.device)
+            #     reg_loss = (eps_diff_0_1 * flow_weight_0_1 + eps_diff_1_2 * flow_weight_1_2).mean()
+            # else:
+            #     reg_loss = torch.tensor(0.0, device=self.args.device)
 
-            # Total loss
-            reg_weight = getattr(self.args, "reg_weight", 0.1)
-            loss = mse_loss + self.attn_supervise_weight * attn_supervision + reg_weight * reg_loss + rel_loss
+            # # Total loss
+            # reg_weight = getattr(self.args, "reg_weight", 0.1)
+            # loss = mse_loss + self.attn_supervise_weight * attn_supervision + reg_weight * reg_loss + rel_loss
+            loss = mse_loss
 
             # Backpropagation
             optimizer.zero_grad()
@@ -131,9 +132,9 @@ class AdjacentAttentionTrainer(BaseTrainer):
                 log_dict = {
                     'loss': loss.item(),
                     'mse_loss': mse_loss.item(),
-                    'attn_supervision': attn_supervision.item(),
-                    'rel_loss': rel_loss.item(),
-                    'reg_loss': reg_loss.item(),
+                    # 'attn_supervision': attn_supervision.item(),
+                    # 'rel_loss': rel_loss.item(),
+                    # 'reg_loss': reg_loss.item(),
                     'flow_weight_scale': self.flow_weight_scale
                 }
                 logger.log(log_dict, display=not step % 100)

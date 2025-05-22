@@ -86,13 +86,13 @@
 # echo "GPUs are free, starting training..."
 
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
-    --arch unet_small \
+    --arch unet_aat \
     --dataset hanco \
-    --trainer shared_epsilon_detach \
-    --use_normalized_flow \
+    --class-cond \
+    --trainer adjacent_attention \
     --epochs 500 \
     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
-    --batch-size 128 \
+    --batch-size 96 \
     --sampling-steps 100 \
     --save-every 50 \
     --num-training-data 25000 \

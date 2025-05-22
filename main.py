@@ -453,11 +453,8 @@ def main():
         default=50000,
         help="Number of images required to sample from the model",
     )
-    # parser.add_argument("--seq-len", type=int, default=1, help="Number of frames in each sequence")
-    parser.add_argument("--seq_len", type=int, default=1, help="Number of frames in each sequence")
+    parser.add_argument("--seq-len", type=int, default=1, help="Number of frames in each sequence")
     parser.add_argument("--use_normalized_flow", action="store_true", help="Use normalized optical flow CSV")
-    # parser.add_argument("--use_flow_weighting", type=bool, default=True, 
-    #                   help="Whether to use flow-based weighting for regularization loss in shared_epsilon trainer")
 
     # Add argument to accept any trainer-specific arguments
     parser.add_argument('--trainer_*', action='append', nargs='+', help='Trainer-specific arguments')

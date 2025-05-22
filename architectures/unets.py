@@ -1241,7 +1241,7 @@ class UNetModel_AAT(nn.Module):
             nn.SiLU(),
             zero_module(conv_nd(dims, input_ch, out_channels, 3, padding=1)),
         )
-    def forward(self, x, timesteps, y=None, labels=None, return_attn=False, return_rel_pos=False):
+    def forward(self, x, timesteps, y=None, return_attn=False, return_rel_pos=False):
         """
         Apply the model to an input batch.
         :param x: an [N x C x H x W] Tensor of inputs (flattened frames).
@@ -1254,14 +1254,14 @@ class UNetModel_AAT(nn.Module):
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
 
-        if labels is not None:
-            self.temporal_labels = labels
+        if y is not None:
+            self.temporal_labels = y
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
-        if labels is not None:
-            emb = emb + self.temporal_label_emb(labels)
+        if y is not None:
+            emb = emb + self.temporal_label_emb(y)
 
         if self.num_classes is not None:
             emb = emb + self.label_emb(y)
