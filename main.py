@@ -282,10 +282,10 @@ def sample_N_images(
                 img = batch_images[i].transpose(1, 2, 0)  # CHW to HWC
                 img_path = os.path.join(save_dir, f"sample_{idx:06d}.png")
                 cv2.imwrite(img_path, img[:, :, ::-1])
-                if args.class_cond and labels_batch is not None:
-                    # Save label as txt
-                    with open(os.path.join(save_dir, f"sample_{idx:06d}.txt"), 'w') as f:
-                        f.write(str(labels_batch[i]))
+                # if args.class_cond and labels_batch is not None:
+                #     # Save label as txt
+                #     with open(os.path.join(save_dir, f"sample_{idx:06d}.txt"), 'w') as f:
+                #         f.write(str(labels_batch[i]))
                 idx += 1
             pbar.update(1)
     if args.class_cond:

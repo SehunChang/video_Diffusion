@@ -194,7 +194,7 @@ class MultiCamVideoDataset(Dataset):
         flow_seq = flow_diffs[start_idx:end_idx-1]  # (seq_len-1,)
 
         # If trainer is adjacent_attention, return labels too
-        if hasattr(self.args, 'trainer') and self.args.trainer == "adjacent_attention":
+        if hasattr(self.args, 'trainer') and "attention" in self.args.trainer:
             labels = torch.arange(self.seq_len)  # [0, 1, 2] for seq_len=3
             return image_seq, flow_seq, labels
         else:

@@ -89,7 +89,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --arch unet_aat \
     --dataset hanco \
     --class-cond \
-    --trainer adjacent_attention \
+    --trainer causal_attention \
     --epochs 500 \
     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
     --batch-size 96 \
