@@ -1249,7 +1249,14 @@ class UNetModel_AAT(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :param labels: temporal frame indices (optional).
         :return: output and optionally attention info dict.
+
+        # self.seq_len determines whether temporal attention is used
+        # If seq_len == 1, assume inference: bypass TemporalCrossAttentionBlock
         """
+
+        # print(f"[UNetModel_AAT.forward] input x.shape: {x.shape}, timesteps.shape: {timesteps.shape}")
+        # print(f"[UNetModel_AAT.forward] self.seq_len = {self.seq_len}")
+
         assert (y is not None) == (
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
@@ -1275,21 +1282,39 @@ class UNetModel_AAT(nn.Module):
 
         # ---- Middle block ----
         # Reshape for TemporalAttentionBlock: (B*T, C, H, W) → (B, C, T, H, W)
-        B = h.shape[0] // self.seq_len  # self.seq_len must be set correctly in model
-        C, H, W = h.shape[1:]
-        h_5d = h.view(B, self.seq_len, C, H, W).permute(0, 2, 1, 3, 4).contiguous()
+        if self.seq_len == 1:
+            # print("[UNetModel_AAT.forward] seq_len == 1 → bypassing temporal attention block.")
+            # bypass attention block
+            h = self.middle_block[0](h, emb)
+            h = self.middle_block[2](h)
+            h = self.middle_block[3](h, emb)
+        else:
+            # print("[UNetModel_AAT.forward] seq_len > 1 → using temporal attention.")
+            B = h.shape[0] // self.seq_len
+            C, H, W = h.shape[1:]
+            h_5d = h.view(B, self.seq_len, C, H, W).permute(0, 2, 1, 3, 4).contiguous()
+            h_5d, mid_info = self.middle_block[1](
+                h_5d, return_attn=return_attn, return_rel_pos=return_rel_pos
+            )
+            h = h_5d.permute(0, 2, 1, 3, 4).contiguous().view(B * self.seq_len, C, H, W)
+            h = self.middle_block[0](h, emb)
+            h = self.middle_block[2](h)
+            h = self.middle_block[3](h, emb)
+        # B = h.shape[0] // self.seq_len  # self.seq_len must be set correctly in model
+        # C, H, W = h.shape[1:]
+        # h_5d = h.view(B, self.seq_len, C, H, W).permute(0, 2, 1, 3, 4).contiguous()
 
-        attn_info = {}
-        h_5d, mid_info = self.middle_block[1](h_5d, return_rel_pos=return_rel_pos, return_attn=return_attn)
-        # x2_out, mid_info = self.middle_block[1](h_5d, return_rel_pos=return_rel_pos, return_attn=return_attn)
-        # h_5d[:, :, 1:2] = x2_out
+        # attn_info = {}
+        # h_5d, mid_info = self.middle_block[1](h_5d, return_rel_pos=return_rel_pos, return_attn=return_attn)
+        # # x2_out, mid_info = self.middle_block[1](h_5d, return_rel_pos=return_rel_pos, return_attn=return_attn)
+        # # h_5d[:, :, 1:2] = x2_out
 
-        # Reshape back to (B*T, C, H, W)
-        h = h_5d.permute(0, 2, 1, 3, 4).contiguous().view(B * self.seq_len, C, H, W)
+        # # Reshape back to (B*T, C, H, W)
+        # h = h_5d.permute(0, 2, 1, 3, 4).contiguous().view(B * self.seq_len, C, H, W)
 
-        h = self.middle_block[0](h, emb)
-        h = self.middle_block[2](h)
-        h = self.middle_block[3](h, emb)
+        # h = self.middle_block[0](h, emb)
+        # h = self.middle_block[2](h)
+        # h = self.middle_block[3](h, emb)
 
         if return_attn or return_rel_pos:
             if mid_info is not None:

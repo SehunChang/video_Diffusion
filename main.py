@@ -168,6 +168,8 @@ class GuassianDiffusion:
                             scalars.beta_tilde[current_sub_t].sqrt()
                         ) * torch.randn_like(final)
                 final = final.detach()
+                # print(f"[sample_from_reverse_process] final image stats: min={final.min().item():.3f}, max={final.max().item():.3f}")
+
         return final
 
 
@@ -239,7 +241,13 @@ def sample_N_images(
 ):
     """Sample N images, saving each as soon as it is generated. Optionally resume from existing images in save_dir."""
     samples, labels, num_samples = [], [], 0
-    num_processes, group = dist.get_world_size(), dist.group.WORLD
+    if dist.is_available() and dist.is_initialized():
+        num_processes = dist.get_world_size()
+        group = dist.group.WORLD
+    else:
+        num_processes = 1
+        group = None
+    # num_processes, group = dist.get_world_size(), dist.group.WORLD
     os.makedirs(save_dir, exist_ok=True)
     # Find already saved images
     existing_images = sorted(glob.glob(os.path.join(save_dir, 'sample_*.png')))
@@ -272,7 +280,11 @@ def sample_N_images(
                 labels_batch = torch.cat(labels_list).detach().cpu().numpy()
             else:
                 labels_batch = None
-            dist.all_gather(samples_list, gen_images, group)
+            # dist.all_gather(samples_list, gen_images, group)
+            if group is not None:
+                dist.all_gather(samples_list, gen_images, group)
+            else:
+                samples_list[0] = gen_images
             batch_images = torch.cat(samples_list).detach().cpu().numpy()
             batch_images = (127.5 * (batch_images + 1)).astype(np.uint8)
             # Save each image
@@ -592,6 +604,9 @@ def main():
 
     # sampling
     if args.sampling_only:
+        args.seq_len = 1
+        model.seq_len = args.seq_len
+        # print(f"[main.py] Sampling mode activated. Using seq_len = {model.seq_len}")
         sample_N_images(
             args.num_sampled_images,
             model,
