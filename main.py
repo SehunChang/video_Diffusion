@@ -305,7 +305,6 @@ def sample_N_images(
     else:
         return None, None
 
-
 class TrainingLogger:
     """Handles logging and directory organization for training."""
     
@@ -646,8 +645,8 @@ def main():
     # Initialize the trainer
     trainer_class = get_trainer(args.trainer, args)
     
-    # Get all arguments that start with 'trainer_'
-    trainer_kwargs = {k[8:]: v for k, v in vars(args).items() if k.startswith('trainer_')}
+    # # Get all arguments that start with 'trainer_'
+    # trainer_kwargs = {k[8:]: v for k, v in vars(args).items() if k.startswith('trainer_')}
     
     trainer = trainer_class(model, diffusion, args, **trainer_kwargs)
     

@@ -85,14 +85,29 @@
 
 # echo "GPUs are free, starting training..."
 
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
+#     --arch unet_aat \
+#     --dataset hanco \
+#     --class-cond \
+#     --trainer causal_attention \
+#     --epochs 500 \
+#     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 96 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 3 \
+#     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+#     --save-dir /media/data3/juhun/diffusion+/ckpts \
+#     --trainer_use_flow_weighting=false \
+
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
-    --arch unet_aat \
+    --arch unet \
     --dataset hanco \
-    --class-cond \
-    --trainer causal_attention \
+    --trainer shared_epsilon \
     --epochs 500 \
     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
-    --batch-size 96 \
+    --batch-size 128 \
     --sampling-steps 100 \
     --save-every 50 \
     --num-training-data 25000 \
@@ -100,7 +115,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
     --save-dir /media/data3/juhun/diffusion+/ckpts \
     --trainer_use_flow_weighting=false \
-
+    --trainer_use_timestep_weighting=true \
+    --trainer_use_flow_weighting=false \
 # CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 --master_port 8101 main.py \
 #     --arch unet_small \
 #     --dataset hanco \

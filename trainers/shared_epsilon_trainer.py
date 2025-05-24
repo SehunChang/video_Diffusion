@@ -21,7 +21,36 @@ class SharedEpsilonTrainer(BaseTrainer):
         
         # Set default values for common arguments
         self.use_flow_weighting = kwargs.get('use_flow_weighting', True)
-        self.flow_weight_scale = kwargs.get('flow_weight_scale', 1.0)  # Example of a new dynamic argument
+        self.flow_weight_scale = kwargs.get('flow_weight_scale', 1.0)
+        # Add timestep weighting configuration
+        self.use_timestep_weighting = kwargs.get('use_timestep_weighting', False)
+        self.timestep_weight_scale = kwargs.get('timestep_weight_scale', 1.0)
+        # Store regularization weight
+        self.reg_weight = getattr(args, "reg_weight", 0.1)
+
+        # Print timestep weights for debugging
+        if self.use_timestep_weighting and args.local_rank == 0:
+            print("\nTimestep weights for all timesteps:")
+            print("Timestep\tWeight")
+            print("-" * 30)
+            
+            # Calculate weights for all timesteps
+            all_timesteps = torch.arange(self.diffusion.timesteps, device=args.device)
+            alpha_bar = self.diffusion.scalars.alpha_bar[all_timesteps]
+            weights = self.timestep_weight_scale * (1.0 - alpha_bar)
+            
+            # Print every 100th timestep to avoid too much output
+            for t in range(0, self.diffusion.timesteps, 100):
+                print(f"{t}\t{weights[t].item():.4f}")
+            # Always print the last timestep
+            if self.diffusion.timesteps % 100 != 0:
+                print(f"{self.diffusion.timesteps-1}\t{weights[-1].item():.4f}")
+            print("-" * 30)
+            print(f"Timestep weight scale: {self.timestep_weight_scale}")
+            print(f"Min weight: {weights.min().item():.4f}")
+            print(f"Max weight: {weights.max().item():.4f}")
+            print(f"Mean weight: {weights.mean().item():.4f}")
+            print()
     
     def train_one_epoch(self, dataloader, optimizer, logger, lrs):
         """Train for one epoch using the shared epsilon training approach."""
@@ -70,22 +99,30 @@ class SharedEpsilonTrainer(BaseTrainer):
             eps_diff_0_1 = ((pred_eps[:, 0] - pred_eps[:, 1]) ** 2).mean(dim=[1, 2, 3])
             eps_diff_1_2 = ((pred_eps[:, 1] - pred_eps[:, 2]) ** 2).mean(dim=[1, 2, 3])
             
+            # Add timestep-dependent weighting using noise sigma
+            if self.use_timestep_weighting:
+                # Get alpha_bar for current timesteps
+                alpha_bar = self.diffusion.scalars.alpha_bar[t]
+                # Use alpha_bar directly for weighting - higher weight for lower alpha_bar (more noise)
+                timestep_weight = self.timestep_weight_scale * (1.0 - alpha_bar)
+            else:
+                timestep_weight = torch.ones_like(t, dtype=torch.float32)
+            
             if self.use_flow_weighting:
                 # Use flow_weight_scale from trainer_args
                 flow_weight_0_1 = self.flow_weight_scale / (1.0 + optical_flow[:, 0])
                 flow_weight_1_2 = self.flow_weight_scale / (1.0 + optical_flow[:, 1])
                 
-                weighted_eps_diff_0_1 = (eps_diff_0_1 * flow_weight_0_1).mean()
-                weighted_eps_diff_1_2 = (eps_diff_1_2 * flow_weight_1_2).mean()
+                weighted_eps_diff_0_1 = (eps_diff_0_1 * flow_weight_0_1 * timestep_weight).mean()
+                weighted_eps_diff_1_2 = (eps_diff_1_2 * flow_weight_1_2 * timestep_weight).mean()
             else:
-                weighted_eps_diff_0_1 = eps_diff_0_1.mean()
-                weighted_eps_diff_1_2 = eps_diff_1_2.mean()
+                weighted_eps_diff_0_1 = (eps_diff_0_1 * timestep_weight).mean()
+                weighted_eps_diff_1_2 = (eps_diff_1_2 * timestep_weight).mean()
             
             reg_loss = weighted_eps_diff_0_1 + weighted_eps_diff_1_2
             
             # Final loss
-            reg_weight = getattr(self.args, "reg_weight", 0.1)
-            loss = mse_loss + reg_weight * reg_loss
+            loss = mse_loss + self.reg_weight * reg_loss
             
             optimizer.zero_grad()
             loss.backward()
@@ -110,5 +147,10 @@ class SharedEpsilonTrainer(BaseTrainer):
                         'flow_weight_0_1': flow_weight_0_1.mean().item(),
                         'flow_weight_1_2': flow_weight_1_2.mean().item(),
                         'flow_weight_scale': self.flow_weight_scale
+                    })
+                if self.use_timestep_weighting:
+                    log_dict.update({
+                        'timestep_weight': timestep_weight.mean().item(),
+                        'timestep_weight_scale': self.timestep_weight_scale
                     })
                 logger.log(log_dict, display=not step % 100)
