@@ -39,6 +39,7 @@ class MultiCamVideoDataset(Dataset):
     def _collect_samples(self):
         samples = []
         for video_id in sorted(os.listdir(self.video_root)):
+            print(video_id)
             video_path = os.path.join(self.video_root, video_id)
             motion_csv_path = os.path.join(self.flow_root, video_id, f"{video_id}_motion.csv")
             if not os.path.exists(motion_csv_path): continue
@@ -150,7 +151,7 @@ def main():
         transforms.ToTensor()
     ])
     dataset = MultiCamVideoDataset(
-        video_root="/WD2/video_Diffusion-main/preprocessed_50k_camfilter_train_",
+        video_root="/media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_",
         flow_root="all_motion_csv",
         seq_len=3,
         transform=transform

@@ -6,8 +6,8 @@
 
 # List of model directories and their architectures
 declare -A models=(
-    ["/media/data3/juhun/diffusion+/ckpts/unet_small_hanco_20250520_210214"]="unet_small"
-    ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250520_093926"]="unet"
+    # ["/media/data3/juhun/diffusion+/ckpts/unet_small_hanco_20250520_210214"]="unet_small"
+    ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250523_012346"]="unet_aat"
 )
 
 # List of epochs to sample from
@@ -31,18 +31,29 @@ for model_dir in "${!models[@]}"; do
         
         save_dir="${model_dir}/gen${epoch}"
         # Skip if save directory already exists
-        if [ -d "$save_dir" ]; then
-            echo "Skipping $save_dir - directory already exists"
-            continue
-        fi
+        # if [ -d "$save_dir" ]; then
+        #     echo "Skipping $save_dir - directory already exists"
+        #     continue
+        # fi
         
         echo "Sampling from ${checkpoint} to ${save_dir}"
         
-        CUDA_VISIBLE_DEVICES=4,5,6,7 python -m torch.distributed.launch \
-            --nproc_per_node=4 --master_port 8103 main.py \
-            --arch $arch $base_args \
-            --save-dir $save_dir \
-            --pretrained-ckpt $checkpoint
+        # Add class-cond flag if architecture is unet_aat
+        if [ "$arch" = "unet_aat" ]; then
+            CUDA_VISIBLE_DEVICES=4,5,6,7 python -m torch.distributed.launch \
+                --nproc_per_node=4 --master_port 8103 main.py \
+                --arch $arch $base_args \
+                --save-dir $save_dir \
+                --pretrained-ckpt $checkpoint \
+                --class-cond \
+                --batch-size 63
+        else
+            CUDA_VISIBLE_DEVICES=4,5,6,7 python -m torch.distributed.launch \
+                --nproc_per_node=4 --master_port 8103 main.py \
+                --arch $arch $base_args \
+                --save-dir $save_dir \
+                --pretrained-ckpt $checkpoint
+        fi
     done
 done
 

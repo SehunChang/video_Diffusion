@@ -1242,6 +1242,7 @@ class UNetModel_AAT(nn.Module):
             zero_module(conv_nd(dims, input_ch, out_channels, 3, padding=1)),
         )
     def forward(self, x, timesteps, y=None, return_attn=False, return_rel_pos=False):
+        print(x.shape)
         """
         Apply the model to an input batch.
         :param x: an [N x C x H x W] Tensor of inputs (flattened frames).
@@ -1292,6 +1293,7 @@ class UNetModel_AAT(nn.Module):
             # print("[UNetModel_AAT.forward] seq_len > 1 → using temporal attention.")
             B = h.shape[0] // self.seq_len
             C, H, W = h.shape[1:]
+
             h_5d = h.view(B, self.seq_len, C, H, W).permute(0, 2, 1, 3, 4).contiguous()
             h_5d, mid_info = self.middle_block[1](
                 h_5d, return_attn=return_attn, return_rel_pos=return_rel_pos
