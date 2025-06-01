@@ -15,6 +15,7 @@ class AdjacentAttentionTrainer(BaseTrainer):
         self.flow_weight_scale = kwargs.get('flow_weight_scale', 1.0)
         self.attn_supervise_weight = kwargs.get('attn_supervise_weight', 1.0)
         self.use_relative_position = kwargs.get('use_relative_position', True)
+        self.shared_epsilon = kwargs.get('shared_epsilon', True)  # Default to True for backward compatibility
 
     def train_one_epoch(self, dataloader, optimizer, logger, lrs):
         self.model.train()
@@ -39,9 +40,14 @@ class AdjacentAttentionTrainer(BaseTrainer):
             frames_flat = video_frames.view(-1, C, H, W)
             t_flat = t.repeat_interleave(T)
 
-            # Shared noise for all 3 frames
-            eps = torch.randn(B, C, H, W, device=self.args.device)
-            eps_flat = eps[:, None, ...].expand(-1, T, -1, -1, -1).reshape(-1, C, H, W)
+            # Generate noise based on shared_epsilon setting
+            if self.shared_epsilon:
+                # Shared noise for all 3 frames
+                eps = torch.randn(B, C, H, W, device=self.args.device)
+                eps_flat = eps[:, None, ...].expand(-1, T, -1, -1, -1).reshape(-1, C, H, W)
+            else:
+                # Independent noise for each frame
+                eps_flat = torch.randn(B * T, C, H, W, device=self.args.device)
 
             # Diffusion forward process
             xt_flat, _ = self.diffusion.sample_from_forward_process(frames_flat, t_flat, eps=eps_flat)

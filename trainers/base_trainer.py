@@ -1,5 +1,6 @@
 import torch
 from tqdm import tqdm
+import logging
 
 class BaseTrainer:
     """Base class for all trainers."""
@@ -16,6 +17,22 @@ class BaseTrainer:
         self.model = model
         self.diffusion = diffusion
         self.args = args
+        
+        # Log trainer attributes
+        self.log_trainer_attributes()
+        
+    def log_trainer_attributes(self):
+        """Log all attributes of the trainer instance."""
+        if self.args.local_rank == 0:  # Only log on main process
+            # Get all attributes that are not methods or built-in attributes
+            attributes = {k: v for k, v in self.__dict__.items() 
+                        if not k.startswith('_') and not callable(v)}
+            
+            # Log each attribute
+            logging.info("Trainer attributes:")
+            for key, value in sorted(attributes.items()):
+                logging.info(f"  {key}: {value}")
+            logging.info("---")
         
     def train_one_epoch(self, dataloader, optimizer, logger, lrs):
         """

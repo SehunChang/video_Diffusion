@@ -28,6 +28,11 @@ class SharedEpsilonTrainer(BaseTrainer):
         # Store regularization weight
         self.reg_weight = getattr(args, "reg_weight", 0.1)
 
+        print(f"use_timestep_weighting: {self.use_timestep_weighting}")
+        print(f"timestep_weight_scale: {self.timestep_weight_scale}")
+        print(f"use_flow_weighting: {self.use_flow_weighting}")
+        print(f"flow_weight_scale: {self.flow_weight_scale}")
+        print(f"reg_weight: {self.reg_weight}")
         # Print timestep weights for debugging
         if self.use_timestep_weighting and args.local_rank == 0:
             print("\nTimestep weights for all timesteps:")

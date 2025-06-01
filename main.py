@@ -247,7 +247,6 @@ def sample_N_images(
     else:
         num_processes = 1
         group = None
-    # num_processes, group = dist.get_world_size(), dist.group.WORLD
     os.makedirs(save_dir, exist_ok=True)
     # Find already saved images
     existing_images = sorted(glob.glob(os.path.join(save_dir, 'sample_*.png')))
@@ -265,9 +264,15 @@ def sample_N_images(
                     .to(args.device)
                 )
             if args.class_cond:
-                y = torch.randint(num_classes, (len(xT),), dtype=torch.int64).to(
-                    args.device
-                )
+                # For unet_aat, always use label 1 during sampling
+                if args.arch == "unet_aat":
+
+                    if args.trainer == "adjacent_attention":
+                        y = torch.ones(len(xT), dtype=torch.int64).to(args.device)
+                    elif args.trainer == "causal_attention":
+                        y = torch.zeros(len(xT), dtype=torch.int64).to(args.device)
+                else:
+                    y = torch.randint(num_classes, (len(xT),), dtype=torch.int64).to(args.device)
             else:
                 y = None
             gen_images = diffusion.sample_from_reverse_process(
@@ -280,7 +285,6 @@ def sample_N_images(
                 labels_batch = torch.cat(labels_list).detach().cpu().numpy()
             else:
                 labels_batch = None
-            # dist.all_gather(samples_list, gen_images, group)
             if group is not None:
                 dist.all_gather(samples_list, gen_images, group)
             else:
@@ -294,10 +298,6 @@ def sample_N_images(
                 img = batch_images[i].transpose(1, 2, 0)  # CHW to HWC
                 img_path = os.path.join(save_dir, f"sample_{idx:06d}.png")
                 cv2.imwrite(img_path, img[:, :, ::-1])
-                # if args.class_cond and labels_batch is not None:
-                #     # Save label as txt
-                #     with open(os.path.join(save_dir, f"sample_{idx:06d}.txt"), 'w') as f:
-                #         f.write(str(labels_batch[i]))
                 idx += 1
             pbar.update(1)
     if args.class_cond:
