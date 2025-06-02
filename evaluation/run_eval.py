@@ -78,11 +78,11 @@ if __name__ == "__main__":
     ap.add_argument("--out_csv", default="results.csv", help="csv output filename")
     ap.add_argument("--n_fake", type=int, default=None, help="number of fake images to use")
     ap.add_argument("--n_real", type=int, default=None, help="number of real images to use")
-    # 평가 모듈 선택 인자: 기본값은 모든 평가 모듈 실행 (fid,pr,aes)
+    # 평가 모듈 선택 : (default)기본값은 모든 평가 모듈 실행 (fid,pr,aes)
     ap.add_argument("--evals", default="fid,pr,aes",
                     help="Comma-separated list of evaluations to run (options: fid, pr, aes)")
     args = ap.parse_args()
 
-    # 입력된 목록을 파싱: 공백을 제거한 후 리스트로 변환
+    # 입력된 목록을 파싱 + 리스트로 변환
     selected_evals = [e.strip() for e in args.evals.split(",") if e.strip()]
     main(args.fake_dir, args.real_dir, args.out_csv, args.n_fake, args.n_real, selected_evals)
