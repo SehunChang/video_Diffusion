@@ -39,19 +39,27 @@ def load_fake_images(folder: str) -> torch.Tensor:
 # ──────────────────────────────────────────────────────────────
 
 
-def main(fake_dir: str, real_dir: str, out_csv: str, n_fake:int, n_real:int):
+def main(fake_dir: str, real_dir: str, out_csv: str, n_fake: int, n_real: int, selected_evals: list[str]):
     fake_imgs = load_fake_images(fake_dir)
 
     # fake 이미지 개수 제한
     if n_fake is not None and n_fake < len(fake_imgs):
         fake_imgs = fake_imgs[:n_fake]
 
-    # 각 모듈의 evaluate()는 dict 를 반환하도록 통일
+    # 평가 모듈 선택: 기본 모듈들을 딕셔너리 형태로 정의
+    available_modules = {
+        "fid": ev_fid,
+        "pr": ev_pr,
+        "aes": ev_aes
+    }
+    # 선택된 모듈 목록에 해당하는 evaluate() 함수만 실행
     metrics: Dict[str, float] = {}
-    for module in (ev_fid, ev_pr,ev_aes):
-        metrics.update(module.evaluate(fake_imgs, real_dir))
-    #for module in (ev_fid, ev_pr):
-    #    metrics.update(module.evaluate(fake_imgs, real_dir, n_fake=n_fake, n_real=n_real))
+    for key in selected_evals:
+        module = available_modules.get(key)
+        if module is not None:
+            metrics.update(module.evaluate(fake_imgs, real_dir, n_fake=n_fake, n_real=n_real))
+        else:
+            print(f"[WARN] Unknown evaluation module: {key}")
 
     # CSV 저장
     with open(out_csv, "w", newline="") as f:
@@ -63,7 +71,6 @@ def main(fake_dir: str, real_dir: str, out_csv: str, n_fake:int, n_real:int):
     for k, v in metrics.items():
         print(f"{k:12}: {v:.6f}")
 
-
 if __name__ == "__main__":
     ap = argparse.ArgumentParser("Run multiple evaluations at once")
     ap.add_argument("--fake_dir", required=True, help="folder with generated images")
@@ -71,6 +78,11 @@ if __name__ == "__main__":
     ap.add_argument("--out_csv", default="results.csv", help="csv output filename")
     ap.add_argument("--n_fake", type=int, default=None, help="number of fake images to use")
     ap.add_argument("--n_real", type=int, default=None, help="number of real images to use")
+    # 평가 모듈 선택 : (default)기본값은 모든 평가 모듈 실행 (fid,pr,aes)
+    ap.add_argument("--evals", default="fid,pr,aes",
+                    help="Comma-separated list of evaluations to run (options: fid, pr, aes)")
     args = ap.parse_args()
 
-    main(args.fake_dir, args.real_dir, args.out_csv, args.n_fake, args.n_real)
+    # 입력된 목록을 파싱 + 리스트로 변환
+    selected_evals = [e.strip() for e in args.evals.split(",") if e.strip()]
+    main(args.fake_dir, args.real_dir, args.out_csv, args.n_fake, args.n_real, selected_evals)
