@@ -143,6 +143,8 @@ class GuassianDiffusion:
             with torch.no_grad():
                 current_t = torch.tensor([t] * len(final), device=final.device)
                 current_sub_t = torch.tensor([i] * len(final), device=final.device)
+                # print("current_t", current_t)
+                # print("current_sub_t", current_sub_t)
                 pred_epsilon = model(final, current_t, **model_kwargs)
                 # using xt+x0 to derive mu_t, instead of using xt+eps (former is more stable)
                 pred_x0 = self.get_x0_from_xt_eps(

@@ -3,12 +3,8 @@ from .shared_epsilon_trainer import SharedEpsilonTrainer
 from .shared_epsilon_trainer_detach import SharedEpsilonTrainer_detach
 from .adjacent_attention_trainer import AdjacentAttentionTrainer
 from .causal_attention_trainer import CausalAttentionTrainer
-__all__ = [
-    "StandardTrainer",
-    "SharedEpsilonTrainer",
-    "SharedEpsilonTrainer_detach",
-    "CausalAttentionTrainer",
-]
+from .mahalanobis_trainer import MahalanobisTrainer
+from .shared_x0s_trainer import SharedX0sTrainer
 
 def get_trainer(trainer_name,args):
     """
@@ -34,6 +30,12 @@ def get_trainer(trainer_name,args):
     elif trainer_name == "causal_attention":
         assert args.seq_len > 1, "Shared epsilon trainer only supports seq_len > 1"
         return CausalAttentionTrainer
+    elif trainer_name == "mahalanobis":
+        assert args.seq_len > 1, "Mahalanobis trainer only supports seq_len > 1"
+        return MahalanobisTrainer
+    elif trainer_name == "shared_x0s":
+        assert args.seq_len > 1, "Shared x0s trainer only supports seq_len > 1"
+        return SharedX0sTrainer
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 
     
