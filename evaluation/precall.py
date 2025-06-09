@@ -18,7 +18,6 @@ from utils import resolve_folder_path
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# ---------- 질문에 주신 두 번째 코드의 함수 그대로 ---------- #
 def preprocess_images(images: torch.Tensor) -> torch.Tensor:
     if images.shape[1] == 1:
         images = images.repeat(1, 3, 1, 1)
