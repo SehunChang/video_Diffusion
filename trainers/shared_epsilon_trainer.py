@@ -25,14 +25,23 @@ class SharedEpsilonTrainer(BaseTrainer):
         # Add timestep weighting configuration
         self.use_timestep_weighting = kwargs.get('use_timestep_weighting', False)
         self.timestep_weight_scale = kwargs.get('timestep_weight_scale', 1.0)
-        # Store regularization weight
+        # Store regularization weight and annealing parameters
         self.reg_weight = getattr(args, "reg_weight", 0.1)
+        # Default to effectively disable annealing (start step set to unreachable number)
+        self.anneal_start_step = kwargs.get('anneal_start_step', float('inf'))
+        self.anneal_end_step = kwargs.get('anneal_end_step', float('inf'))
+        self.anneal_start_weight = self.reg_weight
+        self.anneal_end_weight = kwargs.get('anneal_end_weight', 0.01)
+        self.current_step = 0
 
         print(f"use_timestep_weighting: {self.use_timestep_weighting}")
         print(f"timestep_weight_scale: {self.timestep_weight_scale}")
         print(f"use_flow_weighting: {self.use_flow_weighting}")
         print(f"flow_weight_scale: {self.flow_weight_scale}")
         print(f"reg_weight: {self.reg_weight}")
+        print(f"anneal_start_step: {self.anneal_start_step}")
+        print(f"anneal_end_step: {self.anneal_end_step}")
+        print(f"anneal_end_weight: {self.anneal_end_weight}")
         # Print timestep weights for debugging
         if self.use_timestep_weighting and args.local_rank == 0:
             print("\nTimestep weights for all timesteps:")
@@ -126,8 +135,19 @@ class SharedEpsilonTrainer(BaseTrainer):
             
             reg_loss = weighted_eps_diff_0_1 + weighted_eps_diff_1_2
             
-            # Final loss
-            loss = mse_loss + self.reg_weight * reg_loss
+            # Calculate current regularization weight based on step
+            if self.current_step >= self.anneal_start_step:
+                if self.current_step >= self.anneal_end_step:
+                    current_reg_weight = self.anneal_end_weight
+                else:
+                    # Linear annealing
+                    progress = (self.current_step - self.anneal_start_step) / (self.anneal_end_step - self.anneal_start_step)
+                    current_reg_weight = self.anneal_start_weight + (self.anneal_end_weight - self.anneal_start_weight) * progress
+            else:
+                current_reg_weight = self.reg_weight
+
+            # Final loss with annealed regularization weight
+            loss = mse_loss + current_reg_weight * reg_loss
             
             optimizer.zero_grad()
             loss.backward()
@@ -135,6 +155,9 @@ class SharedEpsilonTrainer(BaseTrainer):
             
             if lrs is not None:
                 lrs.step()
+
+            # Increment step counter
+            self.current_step += 1
 
             # update ema_dict
             if self.args.local_rank == 0:
@@ -146,6 +169,8 @@ class SharedEpsilonTrainer(BaseTrainer):
                 log_dict = {
                     'loss': loss.item(),
                     'reg_loss': reg_loss.item(),
+                    'current_reg_weight': current_reg_weight,
+                    'current_step': self.current_step,
                 }
                 if self.use_flow_weighting:
                     log_dict.update({

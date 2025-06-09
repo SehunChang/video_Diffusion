@@ -214,8 +214,7 @@ class Upsample(nn.Module):
     An upsampling layer with an optional convolution.
     :param channels: channels in the inputs and outputs.
     :param use_conv: a bool determining if a convolution is applied.
-    :param dims: determines if the signal is 1D, 2D, or 3D. If 3D, then
-                 upsampling occurs in the inner-two dimensions.
+    :param dims: determines if the signal is 1D, 2D, or 3D.
     """
 
     def __init__(self, channels, use_conv, dims=2, out_channels=None):
@@ -758,9 +757,9 @@ class UNetModel(nn.Module):
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
-        # if self.num_classes is not None:
-        #     assert y.shape == (x.shape[0],)
-        #     emb = emb + self.label_emb(y)
+        if self.num_classes is not None:
+            assert y.shape == (x.shape[0],)
+            emb = emb + self.label_emb(y)
         h = x.type(self.dtype)
         for module in self.input_blocks:
             h = module(h, emb)
@@ -996,33 +995,35 @@ class TemporalCrossAttentionBlock(nn.Module):
         self.attn = TemporalCrossAttention(dim, heads, dim_head)
 
     def forward(self, x, return_attn=False, return_rel_pos=False):
-
+        # x: (B, C, T, H, W)
         B, C, T, H, W = x.shape
-        x = x.permute(0, 2, 1, 3, 4)
-        
-        # Only average x1 and x3 for attention computation
-        x1 = x[:, 0:1].mean(dim=[3, 4])
-        x2 = x[:, 1:2]
-        x3 = x[:, 2:3].mean(dim=[3, 4])
+        assert T == 3, "Expected 3-frame input"
+
+        x = x.permute(0, 2, 1, 3, 4)  # (B, T, C, H, W)
+        x = x.mean(dim=[3, 4])        # (B, T, C)
+
+        x1 = x[:, 0:1]  # (B, 1, C) ← query
+        x2 = x[:, 1:2]  # (B, 1, C) ← key/value
+        x3 = x[:, 2:3]  # (B, 1, C) ← query
 
         # x1 attends to x2
-        out1, attn_weights_1, rel_bias_1 = self.attn(x1, x2.mean(dim=[3, 4]))
+        out1, attn_weights_1, rel_bias_1 = self.attn(x1, x2)
 
         # x3 attends to x2
-        out3, attn_weights_3, rel_bias_3 = self.attn(x3, x2.mean(dim=[3, 4]))
+        out3, attn_weights_3, rel_bias_3 = self.attn(x3, x2)
 
         # Broadcast outputs
         out1 = out1.permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
         out3 = out3.permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
 
         # Original feature maps for x1, x3
-        x1_orig = x[:, 0:1].permute(0, 2, 1, 3, 4)  # (B, C, 1, H, W)
-        x3_orig = x[:, 2:3].permute(0, 2, 1, 3, 4)  # (B, C, 1, H, W)
+        x1_orig = x[:, 0:1].permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
+        x3_orig = x[:, 2:3].permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
 
         # Updated x1, x3
         x1_updated = x1_orig + out1
         x3_updated = x3_orig + out3
-        x2_unchanged = x[:, 1:2].permute(0, 2, 1, 3, 4)  # (B, C, 1, H, W)
+        x2_unchanged = x[:, 1:2].permute(0, 2, 1).unsqueeze(-1).unsqueeze(-1).expand(-1, -1, 1, H, W)
 
         x_out = torch.cat([x1_updated, x2_unchanged, x3_updated], dim=2)  # (B, C, T, H, W)
 
@@ -1095,8 +1096,8 @@ class UNetModel_AAT(nn.Module):
 
         self.temporal_label_emb = nn.Embedding(seq_len, time_embed_dim)
 
-        # if self.num_classes is not None:
-            # self.label_emb = nn.Embedding(num_classes, time_embed_dim)
+        if self.num_classes is not None:
+            self.label_emb = nn.Embedding(num_classes, time_embed_dim)
 
         ch = input_ch = int(channel_mult[0] * model_channels)
         self.input_blocks = nn.ModuleList(
@@ -1247,20 +1248,22 @@ class UNetModel_AAT(nn.Module):
         :param y: an [N] Tensor of labels, if class-conditional.
         :param labels: temporal frame indices (optional).
         :return: output and optionally attention info dict.
-        """
-        # assert (y is not None) == (
-        #     self.num_classes is not None
-        # ), "must specify y if and only if the model is class-conditional"
 
-        self.temporal_labels = y
+        # During inference (y=1), bypass temporal attention
+        # During training (y=0 or 2), use temporal attention
+        """
+        assert (y is not None) == (
+            self.num_classes is not None
+        ), "must specify y if and only if the model is class-conditional"
+
+        if y is not None:
+            self.temporal_labels = y
 
         hs = []
         emb = self.time_embed(timestep_embedding(timesteps, self.model_channels))
 
-        emb = emb + self.temporal_label_emb(y)
-
-        # if self.num_classes is not None:
-        #     emb = emb + self.label_emb(y)
+        if y is not None:
+            emb = emb + self.temporal_label_emb(y)
 
         h = x.type(self.dtype)
 
@@ -1268,24 +1271,27 @@ class UNetModel_AAT(nn.Module):
         for module in self.input_blocks:
             h = module(h, emb)
             hs.append(h)
-
         # ---- Middle block ----
-        # Reshape for TemporalAttentionBlock: (B*T, C, H, W) → (B, C, T, H, W)
-
-        attn_info = {}
-        if self.training:
-            B = h.shape[0] // self.seq_len  # self.seq_len must be set correctly in model
+        # For inference (eval mode), bypass temporal attention
+        # For training (train mode), use temporal attention
+        if not self.training:
+            # Inference mode - bypass temporal attention
+            h = self.middle_block[0](h, emb)
+            h = self.middle_block[2](h)
+            h = self.middle_block[3](h, emb)
+            mid_info = None
+        else:
+            # Training mode - use temporal attention
+            B = h.shape[0] // self.seq_len
             C, H, W = h.shape[1:]
             h_5d = h.view(B, self.seq_len, C, H, W).permute(0, 2, 1, 3, 4).contiguous()
-            h_5d, mid_info = self.middle_block[1](h_5d, return_rel_pos=return_rel_pos, return_attn=return_attn)
-            # Reshape back to (B*T, C, H, W)
+            h_5d, mid_info = self.middle_block[1](
+                h_5d, return_attn=return_attn, return_rel_pos=return_rel_pos
+            )
             h = h_5d.permute(0, 2, 1, 3, 4).contiguous().view(B * self.seq_len, C, H, W)
-        else:
-            mid_info = None
-
-        h = self.middle_block[0](h, emb)
-        h = self.middle_block[2](h)
-        h = self.middle_block[3](h, emb)
+            h = self.middle_block[0](h, emb)
+            h = self.middle_block[2](h)
+            h = self.middle_block[3](h, emb)
 
         if return_attn or return_rel_pos:
             if mid_info is not None:
@@ -1293,6 +1299,8 @@ class UNetModel_AAT(nn.Module):
                     'attn_weights': mid_info.get('attn_weights'),
                     'rel_pos_bias': mid_info.get('rel_pos_bias')
                 }
+            else:
+                attn_info = None
 
         # Output blocks
         for module in self.output_blocks:

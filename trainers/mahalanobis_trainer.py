@@ -77,59 +77,43 @@ class MahalanobisTrainer(BaseTrainer):
             assert num_frames == 3, "Expected 3 consecutive frames per sample"
             assert (video_frames.max().item() <= 1) and (0 <= video_frames.min().item())
             
-            # Convert to [-1, 1] pixel range and move to device
             video_frames = 2 * video_frames.to(self.args.device) - 1
             optical_flow = optical_flow.to(self.args.device)
             labels = labels.to(self.args.device) if self.args.class_cond else None
             
-            # Sample the same timestep for all frames in a sequence
             t = torch.randint(self.diffusion.timesteps, (batch_size,), dtype=torch.int64).to(self.args.device)
             
-            # Reshape video frames for processing
             frames_flat = video_frames.view(-1, channels, height, width)
             t_flat = t.repeat_interleave(num_frames)
-            
 
-            ############################################
             eps = torch.randn(batch_size, channels, height, width,
                             device=self.args.device)          # ε
             eps_flat = eps[:, None].expand(-1, num_frames, -1, -1, -1).reshape_as(frames_flat)
 
-            # forward diffusion
             xt_flat, _ = self.diffusion.sample_from_forward_process(
                             frames_flat, t_flat, eps=eps_flat)
 
-            # -------------- VARIANCE-AWARE WEIGHTS (diagonal Σ̂) ---------------
             if self.use_var_weighting:
-                # reshape to (B, F, C, H, W) to compute variance across the F=3 frames
                 eps_reshaped = eps_flat.view(batch_size, num_frames, channels, height, width)
 
-                # empirical diagonal variance  Σ̂  in epsilon space
                 eps_bar   = eps_reshaped.mean(dim=1, keepdim=True)                     # (B,1,C,H,W)
                 var_hat  = ((eps_reshaped - eps_bar) ** 2).mean(dim=1)                 # (B,C,H,W)
 
-                # whitening factor  w = 1/(σ+δ)
                 weight   = 1. / (var_hat.sqrt() + self.var_eps)             # (B,C,H,W)
 
-                # expand to all three frames & flatten back
                 weight_flat = weight[:, None].expand(-1, num_frames, -1, -1, -1).reshape(-1, channels, height, width)
             else:
-                weight_flat = 1.                                            # scalar
+                weight_flat = 1.
 
-            # ------------------ MODEL FORWARD & WEIGHTED LOSS ------------------
             pred_eps_flat = self.model(xt_flat, t_flat)
 
-            # Plain MSE loss
             mse_loss = ((pred_eps_flat - eps_flat) ** 2).mean()
 
-            # Mahalanobis (variance-aware) MSE  ‖W·(ε̂−ε)‖²
             wsm_loss = ((weight_flat * (pred_eps_flat - eps_flat)) ** 2).mean()
 
-            # ---------------- EXISTING REGULARISATION (unchanged) --------------
             # pred_eps = pred_eps_flat.view(batch_size, num_frames, channels, height, width)
             # eps_diff_0_1 = ((pred_eps[:, 0] - pred_eps[:, 1]) ** 2).mean(dim=[1, 2, 3])
             # eps_diff_1_2 = ((pred_eps[:, 1] - pred_eps[:, 2]) ** 2).mean(dim=[1, 2, 3])
-            ############################################
 
 
             # Add timestep-dependent weighting using noise sigma

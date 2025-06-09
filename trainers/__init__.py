@@ -5,6 +5,8 @@ from .adjacent_attention_trainer import AdjacentAttentionTrainer
 from .causal_attention_trainer import CausalAttentionTrainer
 from .mahalanobis_trainer import MahalanobisTrainer
 from .shared_x0s_trainer import SharedX0sTrainer
+from .pixel_tangent_trainer import PixelTangentTrainer
+from .calibrated_shared_epsilon_trainer import CalibratedSharedEpsilonTrainer
 
 def get_trainer(trainer_name,args):
     """
@@ -36,6 +38,12 @@ def get_trainer(trainer_name,args):
     elif trainer_name == "shared_x0s":
         assert args.seq_len > 1, "Shared x0s trainer only supports seq_len > 1"
         return SharedX0sTrainer
+    elif trainer_name == "pixel_tangent":
+        assert args.seq_len > 1, "Pixel tangent trainer only supports seq_len > 1"
+        return PixelTangentTrainer
+    elif trainer_name == "calibrated_shared_epsilon":
+        assert args.seq_len > 1, "Calibrated shared epsilon trainer only supports seq_len > 1"
+        return CalibratedSharedEpsilonTrainer
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 
     

@@ -6,12 +6,14 @@
 
 # List of model directories and their architectures and trainers
 declare -A models=(
-    ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250523_012346"]="unet_aat adjacent_attention"
-    # ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250523_170525"]="unet_aat causal_attention"
+    # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250604_234525"]="unet"
+    # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250605_062911"]="unet"
+    # ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250606_180328"]="unet_aat causal_attention"
+    ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250608_120807"]="unet"
 )
 
 # List of epochs to sample from
-epochs=(500 450 400 350 300 250 200 100)
+epochs=(125 500)
 
 # Common sampling arguments
 base_args="--sampling-steps 100 --sampling-only --dataset hanco --batch-size 256 --num-sampled-images 50000"
@@ -41,19 +43,21 @@ for model_dir in "${!models[@]}"; do
         
         # Add class-cond flag if architecture is unet_aat
         if [ "$arch" = "unet_aat" ]; then
+            echo "Sampling with unet_aat"
             CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch \
                 --nproc_per_node=8 --master_port 8103 main.py \
                 --arch $arch --trainer $trainer $base_args \
                 --save-dir $save_dir \
                 --pretrained-ckpt $checkpoint \
                 --class-cond \
-                --batch-size 63
+                --batch-size 512
         else
             CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch \
                 --nproc_per_node=8 --master_port 8103 main.py \
                 --arch $arch $base_args \
                 --save-dir $save_dir \
-                --pretrained-ckpt $checkpoint
+                --pretrained-ckpt $checkpoint \
+                --batch-size 512
         fi
     done
 

@@ -85,14 +85,69 @@
 
 # echo "GPUs are free, starting training..."
 
-# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
-#     --arch unet_aat \
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
+    --arch unet \
+    --dataset hanco \
+    --trainer calibrated_shared_epsilon \
+    --epochs 250 \
+    --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+    --batch-size 128 \
+    --sampling-steps 100 \
+    --save-every 50 \
+    --num-training-data 25000 \
+    --seq-len 3 \
+    --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+    --save-dir /media/data3/juhun/diffusion+/ckpts \
+    --use_normalized_flow False \
+    --trainer_temperature=0.01 \
+    --trainer_use_flow_weighting=false \
+    # --trainer_anneal_start_step=22000 \
+    # --trainer_anneal_end_step=70000 \
+
+
+
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
+#     --arch unet \
 #     --dataset hanco \
-#     --class-cond \
-#     --trainer causal_attention \
+#     --trainer shared_epsilon \
 #     --epochs 500 \
 #     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
-#     --batch-size 96 \
+#     --batch-size 128 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 3 \
+#     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+#     --save-dir /media/data3/juhun/diffusion+/ckpts \
+#     --use_normalized_flow False \
+#     --trainer_anneal_start_step=22000 \
+#     --trainer_anneal_end_step=70000 \
+
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
+#     --arch unet \
+#     --dataset hanco \
+#     --trainer shared_epsilon \
+#     --epochs 500 \
+#     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 128 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 3 \
+#     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+#     --save-dir /media/data3/juhun/diffusion+/ckpts \
+#     --use_normalized_flow False \
+#     --trainer_anneal_start_step=22000 \
+#     --trainer_anneal_end_step=70000 \
+#     --trainer_use_flow_weighting=false
+
+# CUDA_VISIBLE_DEVICES=4,5,6,7 python -m torch.distributed.launch --nproc_per_node=4 --master_port 8105 main.py \
+#     --arch unet \
+#     --dataset hanco \
+#     --trainer pixel_tangent \
+#     --epochs 250 \
+#     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 128 \
 #     --sampling-steps 100 \
 #     --save-every 50 \
 #     --num-training-data 25000 \
@@ -100,6 +155,24 @@
 #     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
 #     --save-dir /media/data3/juhun/diffusion+/ckpts \
 #     --trainer_use_flow_weighting=false \
+    # --trainer_mtr_start_step=1000 \
+    
+# CUDA_VISIBLE_DEVICES=0,1,2,3 python -m torch.distributed.launch --nproc_per_node=4 --master_port 8101 main.py \
+#     --arch unet_aat \
+#     --dataset hanco \
+#     --class-cond \
+#     --trainer adjacent_attention \
+#     --epochs 250 \
+#     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 128 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 3 \
+#     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+#     --save-dir /media/data3/juhun/diffusion+/ckpts \
+#     --trainer_epsilon_weight=0.1
+
 
 # CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
 #     --arch unet \
@@ -151,36 +224,36 @@
     # --resume /media/data3/juhun/diffusion+/ckpts/unet_hanco_20250520_093926/checkpoints/checkpoint_epoch_50.pt
 
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
-    --arch unet \
-    --dataset hanco \
-    --trainer shared_x0s \
-    --epochs 250 \
-    --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
-    --batch-size 128 \
-    --sampling-steps 100 \
-    --save-every 50 \
-    --num-training-data 25000 \
-    --seq-len 3 \
-    --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
-    --save-dir /media/data3/juhun/diffusion+/ckpts \
-    --trainer_use_flow_weighting=False \
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
+#     --arch unet \
+#     --dataset hanco \
+#     --trainer shared_x0s \
+#     --epochs 250 \
+#     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 128 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 3 \
+#     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+#     --save-dir /media/data3/juhun/diffusion+/ckpts \
+#     --trainer_use_flow_weighting=False \
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
-    --arch unet \
-    --dataset hanco \
-    --trainer shared_x0s \
-    --epochs 250 \
-    --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
-    --batch-size 128 \
-    --sampling-steps 100 \
-    --save-every 50 \
-    --num-training-data 25000 \
-    --seq-len 3 \
-    --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
-    --save-dir /media/data3/juhun/diffusion+/ckpts \
-    --trainer_use_flow_weighting=False \
-    --trainer_reg_weight=0.3 
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
+#     --arch unet \
+#     --dataset hanco \
+#     --trainer shared_x0s \
+#     --epochs 250 \
+#     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 128 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 3 \
+#     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+#     --save-dir /media/data3/juhun/diffusion+/ckpts \
+#     --trainer_use_flow_weighting=False \
+#     --trainer_reg_weight=0.01
 
 # CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8101 main.py \
 #     --arch unet \

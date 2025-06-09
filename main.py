@@ -408,6 +408,33 @@ def get_base_dir_from_checkpoint(checkpoint_path):
     return base_dir
 
 
+def get_exponential_checkpoints(total_epochs, num_checkpoints=10):
+    """Calculate exponential checkpoint intervals.
+    
+    Args:
+        total_epochs: Total number of epochs
+        num_checkpoints: Number of checkpoints to save
+        
+    Returns:
+        List of epochs at which to save checkpoints
+    """
+    # Use exponential function: y = a * (b^x - 1)
+    # where a and b are chosen to ensure we get num_checkpoints points
+    # between 0 and total_epochs
+    
+    # Calculate b to get desired number of points
+    b = (total_epochs + 1) ** (1.0 / (num_checkpoints - 1))
+    
+    # Calculate checkpoints
+    checkpoints = []
+    for i in range(num_checkpoints):
+        epoch = int((b ** i) - 1)
+        if epoch < total_epochs:
+            checkpoints.append(epoch)
+    
+    return checkpoints
+
+
 def main():
     parser = argparse.ArgumentParser("Minimal implementation of diffusion models")
     # diffusion model
@@ -486,6 +513,7 @@ def main():
     parser.add_argument("--local_rank", default=0, type=int)
     parser.add_argument("--seed", default=112233, type=int)
     parser.add_argument("--save-every", type=int, default=1, help="Save model every n epochs")
+    parser.add_argument("--num-checkpoints", type=int, default=10, help="Number of checkpoints to save during training")
     parser.add_argument("--resume", type=str, help="Path to checkpoint to resume training from")
 
     # setup
@@ -656,6 +684,12 @@ def main():
     epoch_iter = range(start_epoch, args.epochs)
     if args.local_rank == 0:
         epoch_iter = tqdm(epoch_iter, desc='Epochs', total=args.epochs - start_epoch)
+    
+    # Calculate checkpoint intervals
+    checkpoint_epochs = get_exponential_checkpoints(args.epochs, args.num_checkpoints)
+    if args.local_rank == 0:
+        logger.log_info(f"Will save checkpoints at epochs: {checkpoint_epochs}")
+    
     for epoch in epoch_iter:
         if sampler is not None:
             sampler.set_epoch(epoch)
@@ -678,8 +712,8 @@ def main():
                 resume=False
             )
 
-        # Save checkpoints
-        if args.local_rank == 0 and (epoch + 1) % args.save_every == 0:
+        # Save checkpoints at exponential intervals and every n epochs
+        if args.local_rank == 0 and (epoch in checkpoint_epochs or (epoch + 1) % args.save_every == 0):
             # Save regular checkpoint
             checkpoint_path = logger.get_checkpoint_path(epoch + 1)
             torch.save({

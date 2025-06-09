@@ -16,6 +16,24 @@ class AdjacentAttentionTrainer(BaseTrainer):
         self.attn_supervise_weight = kwargs.get('attn_supervise_weight', 1.0)
         self.use_relative_position = kwargs.get('use_relative_position', True)
         self.shared_epsilon = kwargs.get('shared_epsilon', True)  # Default to True for backward compatibility
+        self.epsilon_weight = kwargs.get('epsilon_weight', 1.0)  # Weight for adjacent frame epsilons
+
+        self.print_attributes()
+    def print_attributes(self):
+        """Print all trainer attributes and their values."""
+        print("\nAdjacentAttentionTrainer Attributes:")
+        print("-" * 30)
+        print(f"use_flow_weighting: {self.use_flow_weighting}")
+        print(f"flow_weight_scale: {self.flow_weight_scale}")
+        print(f"attn_supervise_weight: {self.attn_supervise_weight}")
+        print(f"use_relative_position: {self.use_relative_position}")
+        print(f"shared_epsilon: {self.shared_epsilon}")
+        print(f"epsilon_weight: {self.epsilon_weight}")
+        print("-" * 30)
+        print("\nTrainer Arguments:")
+        for key, value in self.trainer_args.items():
+            print(f"{key}: {value}")
+        print("-" * 30)
 
     def train_one_epoch(self, dataloader, optimizer, logger, lrs):
         self.model.train()
@@ -69,7 +87,16 @@ class AdjacentAttentionTrainer(BaseTrainer):
             target_eps = eps_flat.view(B, T, C, H, W)
 
             # MSE loss
-            mse_loss = F.mse_loss(pred_eps, target_eps)
+            # Apply different weights to center frame and adjacent frames
+            center_weight = 1.0
+            adjacent_weight = self.epsilon_weight
+            
+            # Calculate weighted MSE loss
+            center_loss = F.mse_loss(pred_eps[:, 1], target_eps[:, 1])  # Center frame
+            adjacent_loss = (F.mse_loss(pred_eps[:, 0], target_eps[:, 0]) +  # First frame
+                           F.mse_loss(pred_eps[:, 2], target_eps[:, 2])) / 2  # Last frame
+            
+            mse_loss = center_loss + adjacent_weight * adjacent_loss
 
             # Attention supervision loss
             # attn_weights_1 = extra.get("attn_weights_1")
