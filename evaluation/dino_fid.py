@@ -21,7 +21,7 @@ def _cache_file(cache_dir: str, real_dir: str, n_real: int, model: str) -> str:
 
 class DINOv2FeatureExtractor:
     def __init__(self, model_name='facebook/dinov2-base', batch_size=64):
-        self.processor = AutoImageProcessor.from_pretrained(model_name,use_fast=True)
+        self.processor = AutoImageProcessor.from_pretrained(model_name,use_fast=False)
         self.model = AutoModel.from_pretrained(model_name).to(device).eval()
         self.batch_size = batch_size
 
