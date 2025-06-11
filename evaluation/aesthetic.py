@@ -4,39 +4,60 @@ from PIL import Image
 from torchvision import transforms
 from typing import Dict
 from utils import resolve_folder_path
+import torch.nn as nn
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# class QuickGELU(nn.Module):
+#     def forward(self, x: torch.Tensor):
+#         return x * torch.sigmoid(1.702 * x)
 
 class AestheticPredictor:
     def __init__(
         self,
         clip_arch: str = "ViT-L-14",
         clip_pretrained: str = "openai",
-        #https://github.com/christophschuhmann/improved-aesthetic-predictor 여기서 다운로드해서 저장해둬야 함함
         linear_weights: str = "sac+logos+ava1-l14-linearMSE.pth",
         batch_size: int = 64,
     ):
-        import open_clip  # pip install open_clip_torch
+        import open_clip
         self.batch_size = batch_size
 
-        # 1. CLIP 비전 백본
+        # 1. CLIP 비전 백본 - 기존 코드 유지
         self.clip, _, clip_preprocess = open_clip.create_model_and_transforms(
             clip_arch, device=device, pretrained=clip_pretrained
         )
         self.clip.eval()
 
-        # 2. aesthetic 선형 회귀 헤드
-        if not os.path.isfile(linear_weights):
-            raise FileNotFoundError(
-                f"Linear weights '{linear_weights}' not found.\n"
-                "다운로드: https://github.com/christophschuhmann/improved-aesthetic-predictor"
-            )
-        self.head = torch.nn.Linear(self.clip.visual.output_dim, 1).to(device)
-        self.head.load_state_dict(torch.load(linear_weights, map_location=device))
+        # 2. MLP 헤드로 변경
+        self.head = nn.Sequential(
+            nn.Linear(self.clip.visual.output_dim, 1024),
+            #QuickGELU(),
+            nn.Dropout(0.2),
+            nn.Linear(1024, 128),
+            #QuickGELU(),
+            nn.Dropout(0.2),
+            nn.Linear(128, 64),
+            #QuickGELU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, 16),
+            #QuickGELU(),
+            nn.Linear(16, 1)
+        ).to(device)
+
+        # 가중치 로드 및 키 매핑
+        state_dict = torch.load(linear_weights, map_location=device)
+        new_state_dict = {}
+        for i, (key, value) in enumerate(state_dict.items()):
+            if 'layers.' in key:
+                # layers.0.weight -> 0.weight 형태로 변환
+                new_key = key.replace('layers.', '')
+                new_state_dict[new_key] = value
+        
+        self.head.load_state_dict(new_state_dict)
         self.head.eval()
 
-        # 3. PIL → Tensor 전처리 (repo preprocess 그대로)
-        self.pil_to_tensor = clip_preprocess  # 224 resize + CLIP 정규화
+        # 3. PIL → Tensor 전처리 유지
+        self.pil_to_tensor = clip_preprocess
 
     # ───────────────────────────────────────────────────────
     def _predict_batches(self, img_tensor: torch.Tensor) -> torch.Tensor:
@@ -44,9 +65,10 @@ class AestheticPredictor:
         scores = []
         for i in range(0, len(img_tensor), self.batch_size):
             batch = img_tensor[i : i + self.batch_size]
-            with torch.no_grad(), torch.cuda.amp.autocast(enabled=False):
-                feats = self.clip.encode_image(batch)
-                s = self.head(feats).squeeze(1)
+            with torch.no_grad():
+                with torch.amp.autocast('cuda', enabled=False):
+                    feats = self.clip.encode_image(batch)
+                    s = self.head(feats).squeeze(1)
             scores.append(s)
         return torch.cat(scores, 0)
 
@@ -70,21 +92,48 @@ class AestheticPredictor:
         return self._predict_batches(imgs.to(device))
 
     # ───────────────────────────────────────────────────────
-    def score_folder(self, folder: str) -> torch.Tensor:
-        paths = [
-            os.path.join(folder, f)
-            for f in os.listdir(folder)
-            if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))
-        ]
+    # def score_folder(self, folder: str, num_samples:int=None ) -> torch.Tensor:
+    #     paths = [
+    #         os.path.join(folder, f)
+    #         for f in os.listdir(folder)
+    #         if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))
+    #     ]
+    #     if not paths:
+    #         raise RuntimeError(f"No images found in {folder}")
+    #     # num_samples가 지정된 경우 해당 개수만큼만 선택
+    #     if num_samples is not None and num_samples < len(paths):
+    #         paths = paths[:num_samples]
+
+    #     pil_imgs = [Image.open(p).convert("RGB") for p in paths]
+    #     tensor_imgs = torch.stack([self.pil_to_tensor(img) for img in pil_imgs]).to(
+    #         device
+    #     )
+    #     return self._predict_batches(tensor_imgs)
+    def score_folder(self, folder: str, num_samples: int = None) -> torch.Tensor:
+    
+    #폴더 내의 이미지들에 대한 aesthetic score를 계산
+    
+    # 서브디렉토리를 포함한 모든 이미지 파일 경로 수집
+        paths = []
+        for root, _, files in os.walk(folder):
+            for f in files:
+                if f.lower().endswith((".png", ".jpg", ".jpeg", ".bmp")):
+                    paths.append(os.path.join(root, f))
+        
         if not paths:
-            raise RuntimeError(f"No images found in {folder}")
-
+            raise RuntimeError(f"No images found in {folder} (including subdirectories)")
+        
+        # num_samples가 지정된 경우 해당 개수만큼만 선택
+        if num_samples is not None and num_samples < len(paths):
+            rng = np.random.default_rng(0)  # 재현성을 위한 시드 설정
+            paths = rng.choice(paths, size=num_samples, replace=False)
+        
+        print(f"[Aesthetic] Processing {len(paths)} images from {folder}")
+        
+        # 이미지 로드 및 전처리
         pil_imgs = [Image.open(p).convert("RGB") for p in paths]
-        tensor_imgs = torch.stack([self.pil_to_tensor(img) for img in pil_imgs]).to(
-            device
-        )
+        tensor_imgs = torch.stack([self.pil_to_tensor(img) for img in pil_imgs]).to(device)
         return self._predict_batches(tensor_imgs)
-
 
 # ═══════════════════════════════════════════════════════════
 def evaluate(fake_images: torch.Tensor, real_dir: str,n_fake=None,n_real=None) -> Dict[str, float]:
@@ -97,8 +146,13 @@ def evaluate(fake_images: torch.Tensor, real_dir: str,n_fake=None,n_real=None) -
     if n_fake is not None and n_fake < len(fake_images):
         fake_images = fake_images[:n_fake]
     pred = AestheticPredictor()
+
+    # fake 이미지 개수 제한
+    if n_fake is not None and n_fake < len(fake_images):
+        fake_images = fake_images[:n_fake]
+    
     fake_scores = pred.score_tensor(fake_images)
-    real_scores = pred.score_folder(real_dir,num_samples=n_real)
+    real_scores = pred.score_folder(real_dir, num_samples=n_real)
 
     fake_mean = fake_scores.mean().item()
     real_mean = real_scores.mean().item()

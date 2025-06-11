@@ -89,7 +89,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --arch unet \
     --dataset hanco \
     --trainer slerp_regress \
-    --epochs 500 \
+    --epochs 250 \
     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
     --batch-size 128 \
     --sampling-steps 100 \
@@ -101,9 +101,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --use_normalized_flow False \
     --trainer_anneal_start_step=1000 \
     --trainer_anneal_end_step=25000 \
-    --trainer_anneal_end_weight=0.1 \
-    --reg-weight=0.001 \
-    --use_timestep_weighting True
+    --trainer_anneal_end_weight=0.15 \
+    --reg-weight=0.005 \
+    --trainer_use_timestep_weighting=true
 
 # CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
 #     --arch unet \

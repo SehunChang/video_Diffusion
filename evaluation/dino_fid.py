@@ -21,8 +21,8 @@ def _cache_file(cache_dir: str, real_dir: str, n_real: int, model: str) -> str:
 
 class DINOv2FeatureExtractor:
     def __init__(self, model_name='facebook/dinov2-base', batch_size=64):
+        self.processor = AutoImageProcessor.from_pretrained(model_name,use_fast=False)
         self.model = AutoModel.from_pretrained(model_name).to(device).eval()
-        self.processor = AutoImageProcessor.from_pretrained(model_name)
         self.batch_size = batch_size
 
     def extract_from_tensor(self, images):
@@ -38,24 +38,18 @@ class DINOv2FeatureExtractor:
                 cls = self.model(**inputs).last_hidden_state[:, 0, :]
             feats.append(cls.cpu().numpy())
         return np.concatenate(feats, axis=0)
+
     def extract_from_dir(self, path,num_samples=None):
         path = resolve_folder_path(path)
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor()
         ])
-        
-        # Recursively find all image files in directory and subdirectories
-        image_paths = []
-        for root, _, files in os.walk(path):
-            for f in files:
-                if f.lower().endswith(('.png', '.jpg', '.jpeg')):
-                    image_paths.append(os.path.join(root, f))
-                    
+        image_paths = [os.path.join(path, f) for f in os.listdir(path)
+                       if f.lower().endswith(('.png', '.jpg', '.jpeg'))]
         if num_samples:
             rng = np.random.default_rng(0)
             image_paths = rng.choice(image_paths, size = min(num_samples,len(image_paths)), replace=False)
-            
         feats = []
         for i in range(0, len(image_paths), self.batch_size):
             batch_paths = image_paths[i:i+self.batch_size]
@@ -110,7 +104,7 @@ def compute_dino_fid(fake_images, real_image_dir,n_fake=None,n_real=None,cache_d
     print(f"DINOv2 FID: {fid:.4f}")
     return fid
 
-def evaluate(fake_images, real_image_dir, n_fake=None, n_real=None, cache_dir='.fid_cache'):
+def evaluate(fake_images, real_image_dir, n_fake=None, n_real=None, cache_dir='.fid_cache') -> dict[str, float]:
     """
     Wrapper function to compute DINOv2 FID and return results in a dictionary format.
     """
