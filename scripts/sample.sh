@@ -9,11 +9,11 @@ declare -A models=(
     # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250604_234525"]="unet"
     # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250605_062911"]="unet"
     # ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250606_180328"]="unet_aat causal_attention"
-    ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250608_120807"]="unet"
+    ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250611_004629"]="unet"
 )
 
 # List of epochs to sample from
-epochs=(125 500)
+epochs=(350 300 250 200)
 
 # Common sampling arguments
 base_args="--sampling-steps 100 --sampling-only --dataset hanco --batch-size 256 --num-sampled-images 50000"
@@ -50,14 +50,14 @@ for model_dir in "${!models[@]}"; do
                 --save-dir $save_dir \
                 --pretrained-ckpt $checkpoint \
                 --class-cond \
-                --batch-size 512
+                --batch-size 1024
         else
             CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch \
                 --nproc_per_node=8 --master_port 8103 main.py \
                 --arch $arch $base_args \
                 --save-dir $save_dir \
                 --pretrained-ckpt $checkpoint \
-                --batch-size 512
+                --batch-size 1024
         fi
     done
 
@@ -65,7 +65,6 @@ for model_dir in "${!models[@]}"; do
     echo "Calculating FID scores for ${model_dir}"
     python fid.py --dirs "${model_dir}"
 done
-
 
 # for epoch in 500 400 350; do
 # sampling_args="--arch unet_small --sampling-steps 100 --sampling-only --save-dir /media/data3/juhun/diffusion+/ckpts/unet_small_hanco_20250519_141326/gen500"

@@ -88,8 +88,8 @@
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
     --arch unet \
     --dataset hanco \
-    --trainer calibrated_shared_epsilon \
-    --epochs 250 \
+    --trainer slerp_regress \
+    --epochs 500 \
     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
     --batch-size 128 \
     --sampling-steps 100 \
@@ -99,12 +99,33 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_
     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
     --save-dir /media/data3/juhun/diffusion+/ckpts \
     --use_normalized_flow False \
-    --trainer_temperature=0.01 \
-    --trainer_use_flow_weighting=false \
-    # --trainer_anneal_start_step=22000 \
-    # --trainer_anneal_end_step=70000 \
+    --trainer_anneal_start_step=1000 \
+    --trainer_anneal_end_step=25000 \
+    --trainer_anneal_end_weight=0.1 \
+    --reg-weight=0.001 \
+    --use_timestep_weighting True
 
-
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
+#     --arch unet \
+#     --dataset hanco \
+#     --trainer calibrated_shared_epsilon \
+#     --epochs 250 \
+#     --data-dir /media/data3/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 128 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 3 \
+#     --motion-dir /media/data3/juhun/diffusion+/data/all_motion_csv \
+#     --save-dir /media/data3/juhun/diffusion+/ckpts \
+#     --use_normalized_flow False \
+#     --trainer_temperature=0.001 \
+#     --trainer_use_flow_weighting=false \
+#     --trainer_anneal_start_step=8000 \
+#     --trainer_anneal_end_step=22000 \
+#     --trainer_reg_weight=0.01 \
+#     --trainer_anneal_end_weight=0.001 \
+#     --reg_weight=0.01
 
 # CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
 #     --arch unet \

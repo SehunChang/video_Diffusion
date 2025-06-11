@@ -7,6 +7,7 @@ from .mahalanobis_trainer import MahalanobisTrainer
 from .shared_x0s_trainer import SharedX0sTrainer
 from .pixel_tangent_trainer import PixelTangentTrainer
 from .calibrated_shared_epsilon_trainer import CalibratedSharedEpsilonTrainer
+from .slerp_regress_trainer import slerp_regression_trainer
 
 def get_trainer(trainer_name,args):
     """
@@ -44,6 +45,9 @@ def get_trainer(trainer_name,args):
     elif trainer_name == "calibrated_shared_epsilon":
         assert args.seq_len > 1, "Calibrated shared epsilon trainer only supports seq_len > 1"
         return CalibratedSharedEpsilonTrainer
+    elif trainer_name == "slerp_regress":
+        assert args.seq_len > 1, "Slerp regress trainer only supports seq_len > 1"
+        return slerp_regression_trainer
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 
     
