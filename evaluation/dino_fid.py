@@ -104,7 +104,7 @@ def compute_dino_fid(fake_images, real_image_dir,n_fake=None,n_real=None,cache_d
     print(f"DINOv2 FID: {fid:.4f}")
     return fid
 
-def evaluate(fake_images, real_image_dir, n_fake=None, n_real=None, cache_dir='.fid_cache') -> dict[str, float]:
+def evaluate(fake_images, real_image_dir, n_fake=None, n_real=None, cache_dir='.fid_cache'):
     """
     Wrapper function to compute DINOv2 FID and return results in a dictionary format.
     """

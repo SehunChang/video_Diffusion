@@ -333,9 +333,12 @@ class TrainingLogger:
             self.run_dir = get_base_dir_from_checkpoint(self.args.resume)
             self.log_info(f"Using existing run directory: {self.run_dir}")
         else:
-            # Create new timestamp-based run directory
+            # Create new timestamp-based run directory, or use nickname if provided
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            run_name = f"{self.args.arch}_{self.args.dataset}_{timestamp}"
+            if getattr(self.args, 'nickname', None):
+                run_name = f"{self.args.arch}_{self.args.dataset}_{self.args.nickname}"
+            else:
+                run_name = f"{self.args.arch}_{self.args.dataset}_{timestamp}"
             self.run_dir = os.path.join(self.args.save_dir, run_name)
         
         # Create subdirectories
@@ -515,6 +518,7 @@ def main():
     parser.add_argument("--save-every", type=int, default=1, help="Save model every n epochs")
     parser.add_argument("--num-checkpoints", type=int, default=10, help="Number of checkpoints to save during training")
     parser.add_argument("--resume", type=str, help="Path to checkpoint to resume training from")
+    parser.add_argument("--nickname", type=str, default=None, help="Optional nickname for the run directory. If provided, it will be used as the run directory name.")
 
     # setup
     args, unknown = parser.parse_known_args()

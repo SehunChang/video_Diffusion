@@ -16,8 +16,8 @@ class AestheticPredictor:
         self,
         clip_arch: str = "ViT-L-14",
         clip_pretrained: str = "openai",
-        linear_weights: str = "sac+logos+ava1-l14-linearMSE.pth",
-        batch_size: int = 64,
+        linear_weights: str = "/media/NAS/USERS/juhun/diffusion+/data/sac+logos+ava1-l14-linearMSE.pth",
+        batch_size: int = 16,
     ):
         import open_clip
         self.batch_size = batch_size

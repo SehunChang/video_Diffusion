@@ -9,11 +9,13 @@ declare -A models=(
     # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250604_234525"]="unet"
     # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250605_062911"]="unet"
     # ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250606_180328"]="unet_aat causal_attention"
-    ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250611_004629"]="unet"
+    # ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_t_weighting"]="unet"
+    ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_variance_penalty_seq5"]="unet"
+    ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_v0.1"]="unet"
 )
 
-# List of epochs to sample from
-epochs=(350 300 250 200)
+# List of epochs to sample from (edit this list manually)
+epochs=(200 250 300 350)
 
 # Common sampling arguments
 base_args="--sampling-steps 100 --sampling-only --dataset hanco --batch-size 256 --num-sampled-images 50000"
@@ -63,7 +65,7 @@ for model_dir in "${!models[@]}"; do
 
     # Calculate FID scores after all generations for this model directory are complete
     echo "Calculating FID scores for ${model_dir}"
-    python fid.py --dirs "${model_dir}"
+    python fid.py --dirs "${model_dir}" --epochs "${epochs[@]}"
 done
 
 # for epoch in 500 400 350; do

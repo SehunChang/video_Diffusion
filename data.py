@@ -101,7 +101,8 @@ class MultiCamVideoDataset(Dataset):
         # Create cache directory name based on input paths
         cache_dir = os.path.join(os.path.dirname(video_root), '.cache')
         os.makedirs(cache_dir, exist_ok=True)
-        dataset_name = f"{os.path.basename(video_root)}_{os.path.basename(flow_root)}_{seq_len}"
+        norm_flag = "norm" if use_normalized_flow else "unnorm"
+        dataset_name = f"{os.path.basename(video_root)}_{os.path.basename(flow_root)}_{seq_len}_{norm_flag}"
         if num_training_data is not None:
             dataset_name += f"_{num_training_data}"
         self.cache_path = os.path.join(cache_dir, f"{dataset_name}.pt")
@@ -175,7 +176,6 @@ class MultiCamVideoDataset(Dataset):
                 # Store valid sequence indices
                 valid_indices = list(range(self.half, len(frame_paths) - self.half))
                 self.frame_indices.extend([(len(self.all_frames)-1, idx) for idx in valid_indices])
-
     def __len__(self):
         return len(self.frame_indices)
 

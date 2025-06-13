@@ -8,7 +8,7 @@ from .shared_x0s_trainer import SharedX0sTrainer
 from .pixel_tangent_trainer import PixelTangentTrainer
 from .calibrated_shared_epsilon_trainer import CalibratedSharedEpsilonTrainer
 from .slerp_regress_trainer import slerp_regression_trainer
-
+from .variance_penalty_trainer import variance_penalty_trainer
 def get_trainer(trainer_name,args):
     """
     Returns the trainer class based on the name.
@@ -48,6 +48,9 @@ def get_trainer(trainer_name,args):
     elif trainer_name == "slerp_regress":
         assert args.seq_len > 1, "Slerp regress trainer only supports seq_len > 1"
         return slerp_regression_trainer
+    elif trainer_name == "variance_penalty":
+        assert args.seq_len > 1, "Variance penalty trainer only supports seq_len > 1"
+        return variance_penalty_trainer
     else:
         raise ValueError(f"Unknown trainer: {trainer_name}") 
     

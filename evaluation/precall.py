@@ -514,7 +514,7 @@ def compute_precision_recall(real_feats, fake_feats, real_r, fake_r):
     return precision, recall
 # -------------------------------------------------------------- #
 
-def evaluate(fake_images, real_image_dir,n_fake=None,n_real=None) -> dict[str, float]:
+def evaluate(fake_images, real_image_dir,n_fake=None,n_real=None):
     model = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_FEATURES).to(device)
     # fake 이미지 개수 제한
     if n_fake is not None and n_fake < len(fake_images):
