@@ -121,10 +121,11 @@ class GuassianDiffusion:
         ddim: Use ddim sampling (https://arxiv.org/abs/2010.02502). With very small number of
             sampling steps, use ddim sampling for better image quality.
 
-        Return: An image tensor with identical shape as XT.
+        Return: An image tensor with identical shape as XT and a list of predicted_x0 values.
         """
         model.eval()
         final = xT
+        predicted_x0_values = []  # Track predicted_x0 values
 
         # sub-sampling timesteps for faster sampling
         timesteps = timesteps or self.timesteps
@@ -143,13 +144,12 @@ class GuassianDiffusion:
             with torch.no_grad():
                 current_t = torch.tensor([t] * len(final), device=final.device)
                 current_sub_t = torch.tensor([i] * len(final), device=final.device)
-                # print("current_t", current_t)
-                # print("current_sub_t", current_sub_t)
                 pred_epsilon = model(final, current_t, **model_kwargs)
                 # using xt+x0 to derive mu_t, instead of using xt+eps (former is more stable)
                 pred_x0 = self.get_x0_from_xt_eps(
                     final, pred_epsilon, current_sub_t, scalars
                 )
+                predicted_x0_values.append(pred_x0.detach().cpu())  # Store predicted_x0
                 pred_mean = self.get_pred_mean_from_x0_xt(
                     final, pred_x0, current_sub_t, scalars
                 )
@@ -170,9 +170,8 @@ class GuassianDiffusion:
                             scalars.beta_tilde[current_sub_t].sqrt()
                         ) * torch.randn_like(final)
                 final = final.detach()
-                # print(f"[sample_from_reverse_process] final image stats: min={final.min().item():.3f}, max={final.max().item():.3f}")
 
-        return final
+        return final, predicted_x0_values
 
 
 class LossLogger:
@@ -241,7 +240,9 @@ def sample_N_images(
     save_dir=None,
     resume=True,
 ):
-    """Sample N images, saving each as soon as it is generated. Optionally resume from existing images in save_dir."""
+    """Sample N images, saving each as soon as it is generated. Optionally resume from existing images in save_dir.
+    Also calculates variance statistics of predicted_x0 values during sampling.
+    """
     samples, labels, num_samples = [], [], 0
     if dist.is_available() and dist.is_initialized():
         num_processes = dist.get_world_size()
@@ -257,6 +258,10 @@ def sample_N_images(
         print(f"Resuming from {start_idx} images in {save_dir}")
     total_to_sample = N - start_idx
     idx = start_idx
+    
+    # Track variance statistics
+    all_variances = []
+    
     with tqdm(total=math.ceil(total_to_sample / (args.batch_size * num_processes))) as pbar:
         while idx < N:
             if xT is None:
@@ -268,7 +273,6 @@ def sample_N_images(
             if args.class_cond:
                 # For unet_aat, always use label 1 during sampling
                 if args.arch == "unet_aat":
-
                     if args.trainer == "adjacent_attention":
                         y = torch.ones(len(xT), dtype=torch.int64).to(args.device)
                     elif args.trainer == "causal_attention":
@@ -277,9 +281,18 @@ def sample_N_images(
                     y = torch.randint(num_classes, (len(xT),), dtype=torch.int64).to(args.device)
             else:
                 y = None
-            gen_images = diffusion.sample_from_reverse_process(
+            gen_images, predicted_x0_values = diffusion.sample_from_reverse_process(
                 model, xT, sampling_steps, {"y": y}, args.ddim
             )
+            
+            # Calculate variance for each image in the batch
+            for img_idx in range(len(gen_images)):
+                # Stack all predicted_x0 values for this image across timesteps
+                img_pred_x0 = torch.stack([pred_x0[img_idx] for pred_x0 in predicted_x0_values])
+                # Calculate variance across timesteps
+                img_variance = torch.var(img_pred_x0, dim=0).mean().item()
+                all_variances.append(img_variance)
+            
             samples_list = [torch.zeros_like(gen_images) for _ in range(num_processes)]
             if args.class_cond:
                 labels_list = [torch.zeros_like(y) for _ in range(num_processes)]
@@ -302,6 +315,17 @@ def sample_N_images(
                 cv2.imwrite(img_path, img[:, :, ::-1])
                 idx += 1
             pbar.update(1)
+    
+    # Calculate mean variance across all images
+    mean_variance = np.mean(all_variances) if all_variances else 0.0
+    
+    # Log the mean variance to fid_scores.txt
+    if args.local_rank == 0:
+        base_dir = os.path.dirname(os.path.dirname(save_dir))
+        fid_scores_path = os.path.join(base_dir, "fid_scores.txt")
+        with open(fid_scores_path, "a") as f:
+            f.write(f"Mean predicted_x0 variance: {mean_variance:.6f}\n")
+    
     if args.class_cond:
         return None, None  # Labels are saved per image
     else:
@@ -701,7 +725,7 @@ def main():
         
         # Sample images periodically
         if not epoch % 10:
-            sampled_images, _ = sample_N_images(
+            sampled_images, predicted_x0_values = sample_N_images(
                 32,
                 model,
                 diffusion,

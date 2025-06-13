@@ -10,8 +10,8 @@ declare -A models=(
     # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250605_062911"]="unet"
     # ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250606_180328"]="unet_aat causal_attention"
     # ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_t_weighting"]="unet"
-    ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_variance_penalty_seq5"]="unet"
-    ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_v0.1"]="unet"
+    ["/media/data3/juhun/diffusion+/ckpts/slerp_regress_v0.1increasing"]="unet"
+    ["/media/data3/juhun/diffusion+/ckpts/slerp_regress_v0.1decreasing"]="unet"
 )
 
 # List of epochs to sample from (edit this list manually)
