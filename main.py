@@ -321,10 +321,13 @@ def sample_N_images(
     
     # Log the mean variance to fid_scores.txt
     if args.local_rank == 0:
-        base_dir = os.path.dirname(os.path.dirname(save_dir))
+        # Get the specific training run directory
+        base_dir = os.path.dirname(save_dir)
         fid_scores_path = os.path.join(base_dir, "fid_scores.txt")
+        # Extract epoch number from save_dir path
+        epoch = os.path.basename(save_dir).replace("gen", "")
         with open(fid_scores_path, "a") as f:
-            f.write(f"Mean predicted_x0 variance: {mean_variance:.6f}\n")
+            f.write(f"Mean predicted_x0 variance at epoch {epoch}: {mean_variance:.6f}\n")
     
     if args.class_cond:
         return None, None  # Labels are saved per image

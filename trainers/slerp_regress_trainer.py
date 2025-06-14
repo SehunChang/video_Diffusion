@@ -67,6 +67,128 @@ class slerp_regression_trainer(BaseTrainer):
             print(f"Mean weight: {weights.mean().item():.4f}")
             print()
     
+    def calculate_direction_vector_fixed(self, eps_first, eps_last, num_frames, omega, device):
+        """Calculate direction vector using finite differences for better stability."""
+        batch_size, channels, height, width = eps_first.shape
+        eps_interpolated = torch.zeros(batch_size, num_frames, channels, height, width, device=device)
+        d = torch.zeros_like(eps_interpolated)
+        
+        frame_weights = torch.linspace(0, 1, num_frames, device=device)
+        
+        for k in range(num_frames):
+            weight = frame_weights[k]
+            
+            # SLERP interpolation
+            sin_omega = torch.sin(omega)
+            sin_omega = torch.clamp(sin_omega, 1e-6)
+            # Expand sin_omega to match dimensions
+            sin_omega = sin_omega.view(-1, 1, 1, 1)
+            
+            # Calculate interpolated epsilon with proper broadcasting
+            eps_interpolated[:, k] = (
+                torch.sin((1 - weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
+                torch.sin(weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+            )
+            
+            # Calculate direction using finite differences
+            if k == 0:
+                # Forward difference
+                next_weight = frame_weights[k + 1] if k + 1 < num_frames else weight
+                eps_next = (
+                    torch.sin((1 - next_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
+                    torch.sin(next_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                )
+                d[:, k] = eps_next - eps_interpolated[:, k]
+            elif k == num_frames - 1:
+                # Backward difference
+                prev_weight = frame_weights[k - 1]
+                eps_prev = (
+                    torch.sin((1 - prev_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
+                    torch.sin(prev_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                )
+                d[:, k] = eps_interpolated[:, k] - eps_prev
+            else:
+                # Central difference
+                prev_weight = frame_weights[k - 1]
+                next_weight = frame_weights[k + 1]
+                eps_prev = (
+                    torch.sin((1 - prev_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
+                    torch.sin(prev_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                )
+                eps_next = (
+                    torch.sin((1 - next_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
+                    torch.sin(next_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                )
+                d[:, k] = (eps_next - eps_prev) / 2.0
+        
+        return eps_interpolated, d
+
+    def calculate_align_loss_fixed(self, pred_eps, eps_interpolated, d, num_frames):
+        """Calculate align loss with proper scaling and normalization."""
+        batch_size = pred_eps.shape[0]
+        align_loss = 0
+        
+        for k in range(num_frames):
+            # Get difference from corresponding interpolated epsilon
+            diff = pred_eps[:, k] - eps_interpolated[:, k]  # ε̂ₖ - εₖ
+            
+            # Normalize direction vector properly
+            d_flat = d[:, k].reshape(batch_size, -1)
+            diff_flat = diff.reshape(batch_size, -1)
+            
+            # Calculate projection coefficient
+            d_norm_sq = torch.sum(d_flat ** 2, dim=1, keepdim=True)
+            d_norm_sq = torch.clamp(d_norm_sq, min=1e-8)
+            
+            proj_coeff = torch.sum(d_flat * diff_flat, dim=1, keepdim=True) / d_norm_sq
+            
+            # Calculate orthogonal component
+            proj_flat = proj_coeff * d_flat
+            ortho_flat = diff_flat - proj_flat
+            
+            # Calculate loss for this frame
+            frame_loss = torch.mean(ortho_flat ** 2, dim=1)  # Mean over spatial dimensions
+            align_loss = align_loss + frame_loss
+        
+        # Average over batch and frames
+        align_loss = align_loss.mean() / num_frames
+
+        # Apply timestep weighting if enabled
+        if self.use_timestep_weighting:
+            alpha_bar = self.diffusion.scalars.alpha_bar[t]
+            timestep_weight = self.timestep_weight_scale * (1.0 - alpha_bar)
+            align_loss = (align_loss * timestep_weight).mean()
+        
+        return align_loss
+
+    def calculate_align_loss_cosine(self, pred_eps, eps_interpolated, d, num_frames):
+        """Alternative approach using cosine similarity to encourage alignment."""
+        batch_size = pred_eps.shape[0]
+        align_loss = 0
+        
+        for k in range(num_frames):
+            diff = pred_eps[:, k] - eps_interpolated[:, k]
+            
+            # Flatten for cosine similarity calculation
+            diff_flat = diff.reshape(batch_size, -1)
+            d_flat = d[:, k].reshape(batch_size, -1)
+            
+            # Calculate cosine similarity
+            diff_norm = torch.norm(diff_flat, dim=1, keepdim=True)
+            d_norm = torch.norm(d_flat, dim=1, keepdim=True)
+            
+            # Avoid division by zero
+            diff_norm = torch.clamp(diff_norm, min=1e-8)
+            d_norm = torch.clamp(d_norm, min=1e-8)
+            
+            cos_sim = torch.sum(diff_flat * d_flat, dim=1, keepdim=True) / (diff_norm * d_norm)
+            
+            # Loss is 1 - |cos_sim| to encourage alignment in either direction
+            frame_loss = 1.0 - torch.abs(cos_sim).squeeze()
+            align_loss = align_loss + frame_loss
+        
+        return align_loss.mean() / num_frames
+
     def train_one_epoch(self, dataloader, optimizer, logger, lrs):
         """Train for one epoch using the shared epsilon training approach."""
         self.model.train()
@@ -79,7 +201,7 @@ class slerp_regression_trainer(BaseTrainer):
         for step, (video_frames, optical_flow) in data_iter:
 
             batch_size, num_frames, channels, height, width = video_frames.shape
-            assert num_frames == 3, "Expected 3 consecutive frames per sample"
+            assert num_frames % 2 == 1, "Expected odd number of frames per sample"
             assert (video_frames.max().item() <= 1) and (0 <= video_frames.min().item())
             
             # Convert to [-1, 1] pixel range and move to device
@@ -94,11 +216,35 @@ class slerp_regression_trainer(BaseTrainer):
             frames_flat = video_frames.view(-1, channels, height, width)
             t_flat = t.repeat_interleave(num_frames)
             
-            eps = torch.randn(batch_size, channels, height, width, device=self.args.device)
-            eps_expanded = eps.unsqueeze(1).expand(-1, num_frames, -1, -1, -1)
-            eps_flat = eps_expanded.reshape(-1, channels, height, width)
+            # Sample two different noise vectors for start and end frames
+            eps_first = torch.randn(batch_size, channels, height, width, device=self.args.device)
+            eps_last = torch.randn(batch_size, channels, height, width, device=self.args.device)
             
-            # Forward diffusion process with shared noise
+            # Calculate the angle between the two noise vectors
+            eps_first_norm = eps_first.view(batch_size, -1)
+            eps_last_norm = eps_last.view(batch_size, -1)
+            
+            # Normalize vectors
+            eps_first_norm = eps_first_norm / torch.norm(eps_first_norm, dim=1, keepdim=True)
+            eps_last_norm = eps_last_norm / torch.norm(eps_last_norm, dim=1, keepdim=True)
+            
+            # Calculate dot product
+            dot_product = (eps_first_norm * eps_last_norm).sum(dim=1, keepdim=True)
+            dot_product = torch.clamp(dot_product, -0.9995, 0.9995)  # Prevent numerical instability
+            
+            # Calculate angle
+            omega = torch.acos(dot_product)
+            
+            # Create interpolation weights for each frame
+            frame_weights = torch.linspace(0, 1, num_frames, device=self.args.device).view(1, -1, 1, 1, 1)
+            
+            # SLERP interpolation for each frame
+            eps_interpolated, d = self.calculate_direction_vector_fixed(eps_first, eps_last, num_frames, omega, self.args.device)
+            
+            # Reshape for forward diffusion
+            eps_flat = eps_interpolated.reshape(-1, channels, height, width)
+            
+            # Forward diffusion process with interpolated noise
             xt_flat, _ = self.diffusion.sample_from_forward_process(frames_flat, t_flat, eps=eps_flat)
             
             # Model prediction
@@ -106,46 +252,15 @@ class slerp_regression_trainer(BaseTrainer):
             
             # Reshape predictions back to sequences
             pred_eps = pred_eps_flat.view(batch_size, num_frames, channels, height, width)
-            
+        
             # Original MSE loss
             mse_loss = ((pred_eps_flat - eps_flat) ** 2).mean()
             
-            # Reshape predictions and ground truth to sequences
-            pred_eps = pred_eps_flat.view(batch_size, num_frames, channels, height, width)
-            eps = eps_flat.view(batch_size, num_frames, channels, height, width)
+            if torch.isnan(mse_loss) or torch.isinf(mse_loss):
+                raise ValueError("NaN or Inf encountered in mse_loss")
             
-            # Calculate direction vector d = (ε₊₁ - ε₋₁) / ||ε₊₁ - ε₋₁||
-            eps_diff = eps[:, 2] - eps[:, 0]  # ε₊₁ - ε₋₁
-            eps_diff_norm = torch.norm(eps_diff.view(eps_diff.shape[0], -1), dim=1, keepdim=True).view(-1, 1, 1, 1)
-            d = eps_diff / (eps_diff_norm + 1e-8)  # Add small epsilon for numerical stability
-            
-            # Reshape d for broadcasting
-            d = d.unsqueeze(1)  # [batch_size, 1, channels, height, width]
-            
-            # Calculate orthogonal projection for each frame
-            # (I - ddᵀ)(ε̂ₖ - ε₋₁)
-            align_loss = 0
-            for k in range(num_frames):
-                # Get difference from first frame
-                diff = pred_eps[:, k] - eps[:, 0]  # ε̂ₖ - ε₋₁
-                
-                # Calculate projection: (I - ddᵀ)(ε̂ₖ - ε₋₁)
-                # For each spatial location, this is equivalent to:
-                # diff - (d * (d * diff).sum()) where * is element-wise multiplication
-                proj = (d * diff).sum(dim=[2, 3, 4], keepdim=True)
-                ortho_diff = diff - d * proj
-                
-                # Add squared norm to loss
-                align_loss = align_loss + (ortho_diff ** 2).mean(dim=[1, 2, 3])
-            
-            # Average over frames
-            align_loss = align_loss.mean()
-            
-            # Apply timestep weighting if enabled
-            if self.use_timestep_weighting:
-                alpha_bar = self.diffusion.scalars.alpha_bar[t]
-                timestep_weight = self.timestep_weight_scale * (1.0 - alpha_bar)
-                align_loss = (align_loss * timestep_weight).mean()
+            # Calculate align loss
+            align_loss = self.calculate_align_loss_fixed(pred_eps, eps_interpolated, d, num_frames)
             
             # Calculate current regularization weight based on step
             if self.current_step >= self.anneal_start_step:
@@ -191,7 +306,7 @@ class slerp_regression_trainer(BaseTrainer):
                     })
                 if self.use_timestep_weighting:
                     log_dict.update({
-                        'timestep_weight': timestep_weight.mean().item(),
+                        'timestep_weight': self.timestep_weight_scale,
                         'timestep_weight_scale': self.timestep_weight_scale
                     })
                 logger.log(log_dict, display=not step % 100)
