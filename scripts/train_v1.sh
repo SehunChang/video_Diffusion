@@ -146,45 +146,46 @@
 #     --nickname "slerp_regress_v0.1increasing" \
 #     --reg-weight=0.01 \
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
-    --arch unet \
-    --dataset hanco \
-    --trainer slerp_regress \
-    --epochs 300 \
-    --data-dir /media/NAS/USERS/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
-    --batch-size 128 \
-    --sampling-steps 100 \
-    --save-every 50 \
-    --num-training-data 25000 \
-    --seq-len 5 \
-    --motion-dir /media/NAS/USERS/juhun/diffusion+/video_Diffusion/optical_flow/of_scalar \
-    --save-dir /media/NAS/USERS/juhun/diffusion+/ckpt \
-    --use-normalized-flow False \
-    --trainer_anneal_start_step=1000 \
-    --trainer_anneal_end_step=25000 \
-    --trainer_anneal_end_weight=0.01 \
-    --nickname "slerp_regress_v1.1decreasing_seqlen5" \
-    --reg-weight=0.1 \
+# CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
+#     --arch unet \
+#     --dataset hanco \
+#     --trainer slerp_regress \
+#     --epochs 300 \
+#     --data-dir /media/NAS/USERS/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
+#     --batch-size 128 \
+#     --sampling-steps 100 \
+#     --save-every 50 \
+#     --num-training-data 25000 \
+#     --seq-len 5 \
+#     --motion-dir /media/NAS/USERS/juhun/diffusion+/video_Diffusion/optical_flow/of_scalar \
+#     --save-dir /media/NAS/USERS/juhun/diffusion+/ckpt \
+#     --use-normalized-flow False \
+#     --trainer_anneal_start_step=1000 \
+#     --trainer_anneal_end_step=25000 \
+#     --trainer_anneal_end_weight=0.01 \
+#     --nickname "slerp_regress_v1.1decreasing_seqlen5" \
+#     --reg-weight=0.1 \
 
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=8 --master_port 8105 main.py \
     --arch unet \
     --dataset hanco \
     --trainer slerp_regress \
-    --epochs 300 \
+    --epochs 350 \
     --data-dir /media/NAS/USERS/juhun/diffusion+/data/preprocessed_50k_camfilter_train_ \
     --batch-size 128 \
     --sampling-steps 100 \
     --save-every 50 \
     --num-training-data 25000 \
-    --seq-len 5 \
+    --seq-len 3 \
     --motion-dir /media/NAS/USERS/juhun/diffusion+/video_Diffusion/optical_flow/of_scalar \
     --save-dir /media/NAS/USERS/juhun/diffusion+/ckpt \
+    --trainer_use_flow_weighting=true \
     --use-normalized-flow False \
     --trainer_anneal_start_step=1000 \
     --trainer_anneal_end_step=25000 \
-    --trainer_anneal_end_weight=0.01 \
-    --nickname "slerp_regress_v1.1decreasing_seqlen3" \
-    --reg-weight=0.1 \
+    --trainer_anneal_end_weight=0.05 \
+    --nickname "slerp_regress_v1.1decreasing_seqlen3_wflow" \
+    --reg-weight=0.5 \
 
 # CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7 python -m torch.distributed.launch --nproc_per_node=7 --master_port 8105 main.py \
 #     --arch unet \

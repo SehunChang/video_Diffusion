@@ -10,8 +10,8 @@ declare -A models=(
     # ["/media/data3/juhun/diffusion+/ckpts/unet_hanco_20250605_062911"]="unet"
     # ["/media/data3/juhun/diffusion+/ckpts/unet_aat_hanco_20250606_180328"]="unet_aat causal_attention"
     # ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_t_weighting"]="unet"
-    ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_v1.1decreasing_seqlen5"]="unet"
-    ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_v1.1decreasing_seqlen3"]="unet"
+    # ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_v1.1decreasing_seqlen5"]="unet"
+    ["/media/NAS/USERS/juhun/diffusion+/ckpt/unet_hanco_slerp_regress_v1.1decreasing_seqlen3_wflow"]="unet"
     # ["/media/data3/juhun/diffusion+/ckpts/slerp_regress_v0.1decreasing"]="unet"
 )
 

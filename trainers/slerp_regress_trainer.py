@@ -67,60 +67,63 @@ class slerp_regression_trainer(BaseTrainer):
             print(f"Mean weight: {weights.mean().item():.4f}")
             print()
     
-    def calculate_direction_vector_fixed(self, eps_first, eps_last, num_frames, omega, device):
-        """Calculate direction vector using finite differences for better stability."""
+    def calculate_direction_vector_fixed(self, eps_first, eps_last, num_frames, omega, device, optical_flow=None):
+        """Calculate direction vector using finite differences for better stability, with optional flow-aware spacing."""
         batch_size, channels, height, width = eps_first.shape
         eps_interpolated = torch.zeros(batch_size, num_frames, channels, height, width, device=device)
         d = torch.zeros_like(eps_interpolated)
-        
-        frame_weights = torch.linspace(0, 1, num_frames, device=device)
-        
+
+        if optical_flow is None:
+            # Uniform weights
+            weights = torch.linspace(0, 1, num_frames, device=device).unsqueeze(0).repeat(batch_size, 1)
+        else:
+            # Compute flow-aware weights
+            flow = optical_flow + 1e-6
+            flow_cumsum = torch.cat([torch.zeros(batch_size, 1, device=device), torch.cumsum(flow, dim=1)], dim=1)
+            weights = flow_cumsum / flow_cumsum[:, -1:].clamp(min=1e-6)  # [batch_size, num_frames]
+
         for k in range(num_frames):
-            weight = frame_weights[k]
-            
-            # SLERP interpolation
+            weight = weights[:, k]  # [batch_size]
             sin_omega = torch.sin(omega)
             sin_omega = torch.clamp(sin_omega, 1e-6)
-            # Expand sin_omega to match dimensions
-            sin_omega = sin_omega.view(-1, 1, 1, 1)
-            
-            # Calculate interpolated epsilon with proper broadcasting
+            sin_omega = sin_omega.view(batch_size, 1, 1, 1)
+            w = weight.view(batch_size, 1, 1, 1)
+            omega_expanded = omega.view(batch_size, 1, 1, 1)
             eps_interpolated[:, k] = (
-                torch.sin((1 - weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
-                torch.sin(weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                torch.sin((1 - w) * omega_expanded) / sin_omega * eps_first +
+                torch.sin(w * omega_expanded) / sin_omega * eps_last
             )
-            
             # Calculate direction using finite differences
             if k == 0:
-                # Forward difference
-                next_weight = frame_weights[k + 1] if k + 1 < num_frames else weight
+                next_weight = weights[:, k + 1] if k + 1 < num_frames else weight
+                next_weight_expanded = next_weight.view(batch_size, 1, 1, 1)
                 eps_next = (
-                    torch.sin((1 - next_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
-                    torch.sin(next_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                    torch.sin((1 - next_weight_expanded) * omega_expanded) / sin_omega * eps_first +
+                    torch.sin(next_weight_expanded * omega_expanded) / sin_omega * eps_last
                 )
                 d[:, k] = eps_next - eps_interpolated[:, k]
             elif k == num_frames - 1:
-                # Backward difference
-                prev_weight = frame_weights[k - 1]
+                prev_weight = weights[:, k - 1]
+                prev_weight_expanded = prev_weight.view(batch_size, 1, 1, 1)
                 eps_prev = (
-                    torch.sin((1 - prev_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
-                    torch.sin(prev_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                    torch.sin((1 - prev_weight_expanded) * omega_expanded) / sin_omega * eps_first +
+                    torch.sin(prev_weight_expanded * omega_expanded) / sin_omega * eps_last
                 )
                 d[:, k] = eps_interpolated[:, k] - eps_prev
             else:
-                # Central difference
-                prev_weight = frame_weights[k - 1]
-                next_weight = frame_weights[k + 1]
+                prev_weight = weights[:, k - 1]
+                next_weight = weights[:, k + 1]
+                prev_weight_expanded = prev_weight.view(batch_size, 1, 1, 1)
+                next_weight_expanded = next_weight.view(batch_size, 1, 1, 1)
                 eps_prev = (
-                    torch.sin((1 - prev_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
-                    torch.sin(prev_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                    torch.sin((1 - prev_weight_expanded) * omega_expanded) / sin_omega * eps_first +
+                    torch.sin(prev_weight_expanded * omega_expanded) / sin_omega * eps_last
                 )
                 eps_next = (
-                    torch.sin((1 - next_weight) * omega).view(-1, 1, 1, 1) / sin_omega * eps_first +
-                    torch.sin(next_weight * omega).view(-1, 1, 1, 1) / sin_omega * eps_last
+                    torch.sin((1 - next_weight_expanded) * omega_expanded) / sin_omega * eps_first +
+                    torch.sin(next_weight_expanded * omega_expanded) / sin_omega * eps_last
                 )
                 d[:, k] = (eps_next - eps_prev) / 2.0
-        
         return eps_interpolated, d
 
     def calculate_align_loss_fixed(self, pred_eps, eps_interpolated, d, num_frames):
@@ -239,7 +242,7 @@ class slerp_regression_trainer(BaseTrainer):
             frame_weights = torch.linspace(0, 1, num_frames, device=self.args.device).view(1, -1, 1, 1, 1)
             
             # SLERP interpolation for each frame
-            eps_interpolated, d = self.calculate_direction_vector_fixed(eps_first, eps_last, num_frames, omega, self.args.device)
+            eps_interpolated, d = self.calculate_direction_vector_fixed(eps_first, eps_last, num_frames, omega, self.args.device, optical_flow)
             
             # Reshape for forward diffusion
             eps_flat = eps_interpolated.reshape(-1, channels, height, width)
